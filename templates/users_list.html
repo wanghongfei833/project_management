@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}用户管理 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h4 mb-0">用户管理</h1>
+      <div class="text-muted small">创建账号、调整角色/启用状态、重置密码</div>
+    </div>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('main.users_new') }}">新增用户</a>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>用户名</th>
+          <th>角色</th>
+          <th>状态</th>
+          <th class="text-end">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+          <tr>
+            <td class="text-muted">{{ u.id }}</td>
+            <td class="fw-semibold">{{ u.username }}</td>
+            <td>
+              {% if u.role == 'admin' %}
+                <span class="badge text-bg-danger">管理员</span>
+              {% else %}
+                <span class="badge text-bg-secondary">只读</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if u.is_active %}
+                <span class="badge text-bg-success">启用</span>
+              {% else %}
+                <span class="badge text-bg-warning">禁用</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.users_edit', user_id=u.id) }}">编辑</a>
+              <button
+                class="btn btn-sm btn-outline-danger"
+                type="button"
+                data-bs-toggle="modal"
+                data-bs-target="#resetModal"
+                data-user-id="{{ u.id }}"
+                data-username="{{ u.username }}"
+              >重置密码</button>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-muted">暂无用户</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="modal fade" id="resetModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">重置密码</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="text-muted small mb-2">目标用户：<span id="resetUsername" class="fw-semibold"></span></div>
+          <label class="form-label">请输入你的管理员密码以确认</label>
+          <input class="form-control" type="password" id="adminPassword" autocomplete="current-password">
+          <div class="invalid-feedback d-block" id="resetError"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-di
+          smiss="modal">取消</button>
+          <button type="button" class="btn btn-danger" id="resetConfirmBtn">确认重置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+  const resetModal = document.getElementById('resetModal');
+  let resetUserId = null;
+
+  resetModal.addEventListener('show.bs.modal', (event) => {
+    const btn = event.relatedTarget;
+    resetUserId = btn.getAttribute('data-user-id');
+    document.getElementById('resetUsername').textContent = btn.getAttribute('data-username');
+    document.getElementById('adminPassword').value = '';
+    document.getElementById('resetError').textContent = '';
+  });
+
+  document.getElementById('resetConfirmBtn').addEventListener('click', async () => {
+    const adminPassword = document.getElementById('adminPassword').value;
+    const err = document.getElementById('resetError');
+    err.textContent = '';
+
+    if (!resetUserId) return;
+
+    const body = new URLSearchParams();
+    body.set('admin_password', adminPassword);
+    body.set('csrf_token', csrf);
+
+    const resp = await fetch(`/users/${resetUserId}/reset-password`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': csrf },
+      body
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      err.textContent = data.error || '重置失败';
+      return;
+    }
+
+    const modal = bootstrap.Modal.getInstance(resetModal);
+    modal.hide();
+
+    alert(`密码已重置为：${data.new_password}`);
+  });
+</script>
+{% endblock %}

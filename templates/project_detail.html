@@ -1,0 +1,497 @@
+{% extends "base.html" %}
+{% block title %}项目详情 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <h1 class="h4 mb-1">{{ project.name }}</h1>
+      <div class="text-muted small">状态：{{ '进行中' if project.status == 'open' else '已结束' }}</div>
+    </div>
+    {% if is_admin %}
+      <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=project.id) }}">编辑项目</a>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.project_adjust', project_id=project.id) }}">追加应收</a>
+        <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new', project_id=project.id) }}">新增流水</a>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="text-muted small">项目成员</div>
+          <div class="fw-semibold">
+            {% for u in members %}
+              <span class="badge text-bg-light border">{{ u.username }}</span>
+            {% else %}
+              <span class="text-muted">暂无成员</span>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="text-end">
+          <div class="text-muted small">删除项目</div>
+          {% if delete_req %}
+            <div class="small">
+              已发起删除申请，已同意：
+              {{ approved_user_ids|length }} / {{ members|length }}
+            </div>
+          {% else %}
+            <div class="small text-muted">未发起删除申请</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="mt-3 d-flex gap-2 flex-wrap">
+        {% if is_admin and not delete_req %}
+          <form method="post" action="{{ url_for('main.projects_delete_request', project_id=project.id) }}"
+                onsubmit="return confirm('确认发起删除申请？需要所有项目成员同意后才会真正删除（包含流水/凭证/追加记录）。');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-outline-danger btn-sm" type="submit">发起删除申请</button>
+          </form>
+        {% endif %}
+
+        {% if delete_req %}
+          {% set member_id_list = members|map(attribute='id')|list %}
+          {% if current_user.id in approved_user_ids %}
+            <span class="text-muted small align-self-center">你已同意删除</span>
+          {% elif current_user.id in member_id_list or is_admin %}
+            <form method="post" action="{{ url_for('main.projects_delete_approve', project_id=project.id) }}"
+                  onsubmit="return confirm('确认同意删除该项目？须「全体项目成员同意」或「至少一名管理员同意」后，由管理员执行删除。');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-outline-danger btn-sm" type="submit">我同意删除</button>
+            </form>
+          {% endif %}
+
+          {% if is_admin and delete_can_execute %}
+            <form method="post" action="{{ url_for('main.projects_delete_execute', project_id=project.id) }}"
+                  onsubmit="return confirm('确认立即删除该项目（包含流水/凭证/追加记录）？此操作不可恢复。');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-danger btn-sm" type="submit">执行删除</button>
+            </form>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+          <div class="text-muted small">负责人</div>
+          <div class="fs-5 fw-semibold">{{ leader.username if leader else '（未指定）' }}</div>
+          <div class="text-muted small mt-2">计划周期</div>
+          <div class="fw-semibold">{{ project.planned_start_date }} → {{ project.planned_end_date }}</div>
+          <div class="text-muted small">今天：{{ today }} · 剩余天数：<span class="fw-semibold">{{ days_left }}</span></div>
+        </div>
+        <div style="min-width: 260px; flex: 1;">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <div class="text-muted small">时间进度</div>
+            <div class="small text-muted">{{ days_elapsed }} / {{ days_total }} 天</div>
+          </div>
+          <div class="progress" style="height: 14px;">
+            <div class="progress-bar" role="progressbar" style="width: {{ progress_pct }}%;" aria-valuenow="{{ progress_pct }}" aria-valuemin="0" aria-valuemax="100">
+              {{ progress_pct }}%
+            </div>
+          </div>
+          <div class="form-text mt-2">进度按“计划开始→计划结束”的自然日占用估算（用于概览，不做严格项目管理）。</div>
+        </div>
+      </div>
+
+      <hr class="my-4">
+
+      <div class="row g-4">
+        <div class="col-lg-6">
+          <div class="fw-semibold mb-2">修改计划结束日期（须成员全员或管理员同意）</div>
+
+          {% if end_change_req %}
+            <div class="alert alert-warning py-2 small mb-2">
+              审批中：拟将结束日期从 <strong>{{ end_change_req.old_end_date }}</strong> 调整为 <strong>{{ end_change_req.new_end_date }}</strong>
+              <div class="mt-1">同意进度：{{ end_change_approved_ids|length }} / {{ members|length }}</div>
+            </div>
+
+            {% set member_ids = members|map(attribute='id')|list %}
+            {% if current_user.id in end_change_approved_ids %}
+              <span class="badge text-bg-secondary">你已同意</span>
+            {% elif current_user.id in member_ids or is_admin %}
+              <form method="post" action="{{ url_for('main.project_end_date_change_approve', project_id=project.id) }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-primary" type="submit">同意变更</button>
+              </form>
+            {% endif %}
+
+            {% if is_admin and end_change_can_execute %}
+              <form method="post" action="{{ url_for('main.project_end_date_change_execute', project_id=project.id) }}" class="d-inline ms-1">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-success" type="submit">执行变更</button>
+              </form>
+            {% endif %}
+
+            {% if is_admin or end_change_req.created_by_user_id == current_user.id %}
+              <form method="post" action="{{ url_for('main.project_end_date_change_cancel', project_id=project.id) }}" class="d-inline ms-1"
+                    onsubmit="return confirm('确认取消结束日期变更申请？');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button>
+              </form>
+            {% endif %}
+          {% else %}
+            <form method="post" action="{{ url_for('main.project_end_date_change', project_id=project.id) }}">
+              {{ end_change_form.hidden_tag() }}
+              <div class="mb-2">
+                <label class="form-label">新的计划结束日期</label>
+                {{ end_change_form.new_end_date(class="form-control") }}
+              </div>
+              <button class="btn btn-sm btn-primary" type="submit">提交变更申请</button>
+            </form>
+          {% endif %}
+        </div>
+
+        <div class="col-lg-6">
+          <div class="fw-semibold mb-2">提交项目进展（图文）</div>
+          <form method="post" action="{{ url_for('main.project_update_post', project_id=project.id) }}" enctype="multipart/form-data">
+            {{ update_form.hidden_tag() }}
+            <div class="mb-2">
+              <label class="form-label">文字</label>
+              {{ update_form.body(class="form-control", rows="4", placeholder="写清楚进展、风险、下一步…") }}
+            </div>
+            <div class="mb-2">
+              <label class="form-label">图片/附件（可多选）</label>
+              <input class="form-control" type="file" name="attachments" multiple>
+            </div>
+            <button class="btn btn-sm btn-primary" type="submit">发布进展</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="fw-semibold mb-2">项目日志</div>
+      <p class="small text-muted mb-3">系统自动记录关键操作（与下方「进展记录」不同：此处为配置、流水、审批、删除等事件）。</p>
+      <ul class="list-unstyled mb-0 small">
+        {% for log in activity_logs %}
+          <li class="border-bottom py-2">
+            <div class="text-muted">
+              {{ log.created_at.strftime('%Y-%m-%d %H:%M') }}
+              {% if log.actor %} · {{ log.actor.username }}{% endif %}
+            </div>
+            <div>{{ log.summary }}</div>
+            {% if log.detail %}
+              <div class="text-muted font-monospace mt-1" style="font-size: .75rem;">{{ log.detail }}</div>
+            {% endif %}
+          </li>
+        {% else %}
+          <li class="text-muted">暂无操作日志</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  {% if project_updates %}
+    <div class="card mb-4">
+      <div class="card-body">
+        <div class="fw-semibold mb-3">进展记录</div>
+        {% for u in project_updates %}
+          <div class="border rounded p-3 mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <div class="small text-muted">
+                {{ u.created_at }}
+                {% if u.created_by_user_id %}
+                  · 用户 ID：{{ u.created_by_user_id }}
+                {% endif %}
+              </div>
+            </div>
+            <div class="mb-2" style="white-space: pre-wrap;">{{ u.body }}</div>
+            {% if u.attachments %}
+              <div class="d-flex flex-wrap gap-2">
+                {% for a in u.attachments %}
+                  {% if a.filename.lower().endswith('.png') or a.filename.lower().endswith('.jpg') or a.filename.lower().endswith('.jpeg') or a.filename.lower().endswith('.webp') or a.filename.lower().endswith('.gif') %}
+                    <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank" class="d-block">
+                      <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" alt="{{ a.filename }}" style="max-height: 160px; border-radius: 8px;">
+                    </a>
+                  {% else %}
+                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a>
+                  {% endif %}
+                {% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="card border border-primary shadow-sm mb-4">
+    <div class="card-body">
+      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+          <div class="text-muted small">已实现盈利（我方已收净额 − 已付支出）</div>
+          <div class="display-6 fw-bold {% if profit_realized_cents < 0 %}text-danger{% else %}text-success{% endif %}">
+            ¥ {{ '%.2f'|format(profit_realized_cents/100) }}
+          </div>
+          <div class="small text-muted mt-1">
+            若合同金额全部收回（估）：盈利约 <span class="fw-semibold">¥ {{ '%.2f'|format(profit_if_fully_collected_cents/100) }}</span>
+            <span class="text-muted">（我方应收净额 − 已付支出）</span>
+          </div>
+        </div>
+        <div class="text-end" style="max-width: 320px;">
+          <div class="text-muted small">中介设置</div>
+          <div class="small">
+            {% if finance.is_net_from_broker %}
+              <span class="badge text-bg-info">中介先扣</span>
+            {% else %}
+              <span class="badge text-bg-secondary">我方另付</span>
+            {% endif %}
+            {% if finance.is_percent_mode %}
+              <span class="badge text-bg-light border">比例 {{ '%.2f'|format((project.referral_ratio or 0)*100) }}%</span>
+            {% else %}
+              <span class="badge text-bg-light border">固定 ¥ {{ '%.2f'|format((project.broker_fixed_fee_cents or 0)/100) }}</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <hr class="my-3">
+
+      <div class="fw-semibold mb-2">可分红（按当前盈余口径）</div>
+      <div class="row g-3 align-items-stretch">
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100 bg-body-secondary">
+            <div class="text-muted small">可分红基数（当前总池）</div>
+            <div class="fs-4 fw-semibold">¥ {{ '%.2f'|format(dividend_base_cents/100) }}</div>
+            <div class="small text-muted">max(0, 我方已收净额 − 支出)，登记分红不可超过「剩余」</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small">累计已登记分红</div>
+            <div class="fs-4 fw-semibold">¥ {{ '%.2f'|format(dividend_paid_total_cents/100) }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100 border-success">
+            <div class="text-muted small">剩余可分红</div>
+            <div class="fs-4 fw-bold text-success">¥ {{ '%.2f'|format(dividend_remaining_cents/100) }}</div>
+          </div>
+        </div>
+      </div>
+
+      {% if is_admin %}
+        <div class="mt-3 p-3 border rounded bg-light">
+          <div class="fw-semibold small mb-2">分红划出（会生成一笔“支出流水”，并影响结余/余额）</div>
+          <form method="post" action="{{ url_for('main.project_dividend_post', project_id=project.id) }}" class="row g-2 align-items-end">
+            {{ dividend_form.hidden_tag() }}
+            <div class="col-sm-6 col-md-4">
+              <label class="form-label small mb-0">分红对象（默认项目成员）</label>
+              {{ dividend_form.recipient_key(class="form-select form-select-sm") }}
+            </div>
+            <div class="col-sm-6 col-md-4">
+              <label class="form-label small mb-0">新增分红对象（可选）</label>
+              {{ dividend_form.new_recipient_name(class="form-control form-control-sm") }}
+              <div class="form-text">填写后会自动加入上方下拉（本项目）。</div>
+            </div>
+            <div class="col-sm-4 col-md-3">
+              <label class="form-label small mb-0">金额（元）</label>
+              {{ dividend_form.amount_yuan(class="form-control form-control-sm") }}
+            </div>
+            <div class="col-12 col-md-7">
+              <label class="form-label small mb-0">备注（可选）</label>
+              {{ dividend_form.note(class="form-control form-control-sm", placeholder="例如：股东会决议号、收款人…") }}
+            </div>
+            <div class="col-auto">
+              <button type="submit" class="btn btn-sm btn-success">确认划出</button>
+            </div>
+          </form>
+          <div class="text-muted small mt-2">校验：分红不可导致项目结余为负（以已结算流水余额为准）。</div>
+        </div>
+      {% endif %}
+
+      {% if dividend_rows %}
+        <div class="mt-3">
+          <div class="text-muted small mb-1">最近登记</div>
+          <div class="table-responsive">
+            <table class="table table-sm table-borderless mb-0">
+              <tbody>
+                {% for d in dividend_rows %}
+                  <tr class="border-bottom">
+                    <td class="text-muted small text-nowrap">{{ d.created_at }}</td>
+                    <td class="text-end fw-semibold text-nowrap">¥ {{ '%.2f'|format(d.amount_cents/100) }}</td>
+                    <td class="small text-truncate" style="max-width: 360px;">{{ d.note or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% endif %}
+
+      <details class="mt-4">
+        <summary class="fw-semibold text-primary" style="cursor: pointer;">展开：回款与合同明细、中介拆分</summary>
+        <div class="text-muted small mt-2 mb-3">
+          {% if finance.is_net_from_broker %}
+            收入流水为<strong>净额</strong>（中介已从客户款中扣除其部分）。下表「等价客户全额」仅供对账理解。
+          {% else %}
+            收入流水为<strong>客户全额</strong>；我方净额 = 合同全额 − 中介（比例或固定）。
+          {% endif %}
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <tbody>
+              {% if finance.is_net_from_broker %}
+                <tr><td class="text-muted">我方合同应收（主口径）</td><td class="text-end fw-semibold">¥ {{ '%.2f'|format(expected_net_cents/100) }}</td></tr>
+                <tr><td class="text-muted">等价客户侧全额（推算）</td><td class="text-end">¥ {{ '%.2f'|format(finance.contract_display_gross_equiv_cents/100) }}</td></tr>
+                <tr><td class="text-muted">已回款（流水净额）</td><td class="text-end">¥ {{ '%.2f'|format(received_cents/100) }}</td></tr>
+                <tr><td class="text-muted">我方已收净额</td><td class="text-end">¥ {{ '%.2f'|format(received_net_cents/100) }}</td></tr>
+                <tr><td class="text-muted">我方未收净额</td><td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(remaining_net_cents/100) }}</td></tr>
+              {% else %}
+                <tr><td class="text-muted">客户合同全额</td><td class="text-end fw-semibold">¥ {{ '%.2f'|format(expected_total_cents/100) }}</td></tr>
+                <tr><td class="text-muted">我方应收净额</td><td class="text-end">¥ {{ '%.2f'|format(expected_net_cents/100) }}</td></tr>
+                <tr><td class="text-muted">已回款（客户全额流水）</td><td class="text-end">¥ {{ '%.2f'|format(received_cents/100) }}</td></tr>
+                <tr><td class="text-muted">我方已收净额</td><td class="text-end">¥ {{ '%.2f'|format(received_net_cents/100) }}</td></tr>
+                <tr><td class="text-muted">未回款（客户全额）</td><td class="text-end">¥ {{ '%.2f'|format(remaining_gross_cents/100) }}</td></tr>
+                <tr><td class="text-muted">我方未收净额</td><td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(remaining_net_cents/100) }}</td></tr>
+              {% endif %}
+              <tr><td class="text-muted">已付款支出</td><td class="text-end">¥ {{ '%.2f'|format(paid_cents/100) }}</td></tr>
+              <tr><td class="text-muted">中介费用（合同口径）</td><td class="text-end">¥ {{ '%.2f'|format(broker_fee_expected_total_cents/100) }}</td></tr>
+              <tr><td class="text-muted">中介对应（已回款推算）</td><td class="text-end">¥ {{ '%.2f'|format(broker_estimated_cents/100) }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <h2 class="h6">应收追加记录</h2>
+  <div class="table-responsive mb-4">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th class="text-end">追加金额</th>
+          <th>备注</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in adjustments %}
+          <tr>
+            <td class="text-muted small">{{ a.created_at }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(a.amount_cents/100) }}</td>
+            <td class="text-truncate" style="max-width: 520px;">{{ a.note or '' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3" class="text-muted">暂无追加记录</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="h6">流水（该项目）</h2>
+  <div class="text-muted small mb-2">结余列：按时间顺序累计<strong>已结算</strong>流水（收入 +、支出 −）后的项目账户余额；未结算不改变结余。</div>
+  {% if tx_pagination.pages > 1 %}
+    <div class="text-muted small mb-2">第 {{ tx_pagination.page }} / {{ tx_pagination.pages }} 页，共 {{ tx_pagination.total }} 条</div>
+  {% endif %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>日期</th>
+          <th>类型</th>
+          <th class="text-end">金额</th>
+          <th class="text-end">结余</th>
+          <th>状态</th>
+          <th>对方</th>
+          <th>备注</th>
+          <th>凭证</th>
+          <th class="text-end">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in transactions %}
+          <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
+            <td>{{ t.occur_date }}</td>
+            <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(t.amount_cents/100) }}</td>
+            <td class="text-end small fw-semibold">¥ {{ '%.2f'|format((balance_after_by_tx_id.get(t.id, 0))/100) }}</td>
+            <td>{{ '已结算' if t.settled else '未结算' }}</td>
+            <td>{{ t.counterparty or '' }}</td>
+            <td class="text-truncate" style="max-width: 360px;">{{ t.note or '' }}</td>
+            <td>
+              {% for a in t.attachments %}
+                <div><a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a></div>
+              {% else %}
+                <span class="text-muted">无</span>
+              {% endfor %}
+            </td>
+            <td class="text-end">
+              {% set ereq = edit_req_by_tx.get(t.id) %}
+              {% set mc = members|length %}
+
+              {% if ereq %}
+                <div class="small text-muted mb-1">
+                  拟改：{{ '收入' if ereq.new_type == 'income' else '支出' }}
+                  · ¥ {{ '%.2f'|format(ereq.new_amount_cents/100) }}
+                  · {{ ereq.new_occur_date }}
+                  · {{ '已结算' if ereq.new_settled else '未结算' }}
+                </div>
+                <div class="small text-muted mb-2">同意进度：{{ ereq.approvals|length }} / {{ mc }}</div>
+
+                {% set approved_ids = ereq.approvals|map(attribute='user_id')|list %}
+                {% set member_ids = members|map(attribute='id')|list %}
+                {% if current_user.id in approved_ids %}
+                  <span class="badge text-bg-secondary">你已同意</span>
+                {% elif current_user.id in member_ids or is_admin %}
+                  <form method="post" action="{{ url_for('main.transactions_edit_approve', transaction_id=t.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-primary" type="submit">同意修改</button>
+                  </form>
+                {% else %}
+                  <span class="text-muted small">非项目成员</span>
+                {% endif %}
+
+                {% if is_admin and edit_can_execute_by_tx.get(t.id) %}
+                  <form method="post" action="{{ url_for('main.transactions_edit_execute', transaction_id=t.id) }}" class="d-inline ms-1">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-success" type="submit">执行修改</button>
+                  </form>
+                {% endif %}
+
+                {% if is_admin or ereq.created_by_user_id == current_user.id %}
+                  <form method="post" action="{{ url_for('main.transactions_edit_cancel', transaction_id=t.id) }}" class="d-inline ms-1"
+                        onsubmit="return confirm('确认取消该流水修改申请？');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button>
+                  </form>
+                {% endif %}
+              {% elif is_admin %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.transactions_edit', transaction_id=t.id) }}">修改</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" class="text-muted">暂无流水</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if tx_pagination.pages > 1 %}
+    <nav class="mt-2" aria-label="流水分页">
+      <ul class="pagination pagination-sm">
+        {% if tx_pagination.has_prev %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.project_detail', project_id=project.id, tx_page=tx_pagination.prev_num) }}">上一页</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">上一页</span></li>
+        {% endif %}
+        {% if tx_pagination.has_next %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.project_detail', project_id=project.id, tx_page=tx_pagination.next_num) }}">下一页</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">下一页</span></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+
+  <a class="btn btn-outline-secondary" href="{{ url_for('main.projects_list') }}">返回</a>
+{% endblock %}
+

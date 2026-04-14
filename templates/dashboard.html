@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h4 mb-0">仪表盘</h1>
+      <div class="text-muted small">快速查看入账/出账、未回款与项目概览</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.projects_new') }}">新建项目</a>
+      {% if is_admin %}
+        <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new') }}">新增流水</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-body">
+          <div class="text-muted small">入账（已到账）</div>
+          <div class="fs-4">¥ {{ '%.2f'|format(income_cents/100) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-body">
+          <div class="text-muted small">出账（已付款）</div>
+          <div class="fs-4">¥ {{ '%.2f'|format(expense_cents/100) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-body">
+          <div class="text-muted small">净额</div>
+          <div class="fs-4">¥ {{ '%.2f'|format(net_cents/100) }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div class="fw-semibold">入账 vs 出账</div>
+            <a class="small" href="{{ url_for('main.reports') }}">查看报表</a>
+          </div>
+          <canvas id="chart-summary" height="120"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <div class="fw-semibold">项目未回款（Top10，按我方净额）</div>
+          <canvas id="chart-projects" height="120"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="h6">项目回款概览</h2>
+  <div class="text-muted small mb-2">
+    合同金额统一为客户合同总价；「中介先扣」项目的收入流水通常记我方净额（中介已扣），「我方另付」项目收入流水通常记客户全额。未收净额均为我方口径。
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>项目</th>
+          <th class="text-end">我方应收(合同)</th>
+          <th class="text-end">流水累计入账</th>
+          <th class="text-end">我方已收净</th>
+          <th class="text-end">我方未收净</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in project_rows %}
+          <tr>
+            <td>{{ row.project.name }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(row.expected_net_cents/100) }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(row.received_cents/100) }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(row.received_net_cents/100) }}</td>
+            <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(row.remaining_net_cents/100) }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=row.project.id) }}">查看</a>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="text-muted">暂无项目</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if list_pages > 1 %}
+    <nav class="mt-2" aria-label="项目列表分页">
+      <ul class="pagination pagination-sm justify-content-center mb-0">
+        {% if list_has_prev %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.dashboard', page=list_prev_page) }}">上一页</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">上一页</span></li>
+        {% endif %}
+        <li class="page-item disabled"><span class="page-link">{{ list_page }} / {{ list_pages }}（共 {{ list_total }} 条）</span></li>
+        {% if list_has_next %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.dashboard', page=list_next_page) }}">下一页</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">下一页</span></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const income = {{ (income_cents/100)|round(2) }};
+  const expense = {{ (expense_cents/100)|round(2) }};
+  new Chart(document.getElementById('chart-summary'), {
+    type: 'bar',
+    data: {
+      labels: ['入账', '出账'],
+      datasets: [{
+        label: '流水金额（元，全额）',
+        data: [income, expense],
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+
+  const proj = {{ chart_projects_json|safe }};
+  new Chart(document.getElementById('chart-projects'), {
+    type: 'bar',
+    data: {
+      labels: proj.labels,
+      datasets: [{
+        label: '我方未收净额（元）',
+        data: proj.remaining,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      indexAxis: 'y',
+      scales: { x: { beginAtZero: true } }
+    }
+  });
+</script>
+{% endblock %}
+

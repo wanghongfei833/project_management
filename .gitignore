@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# local db / instance
+instance/
+*.db
+
+# uploads are usually environment-specific (keep if you need them in repo)
+uploads/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/

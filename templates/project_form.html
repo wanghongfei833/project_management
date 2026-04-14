@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑项目' if mode=='edit' else '新建项目' }} - 项目账本{% endblock %}
+{% block content %}
+  <h1 class="h4 mb-3">{{ '编辑项目' if mode=='edit' else '新建项目' }}</h1>
+
+  <form method="post" class="card">
+    <div class="card-body">
+      {{ form.hidden_tag() }}
+      <div class="mb-3">
+        <label class="form-label">项目名称</label>
+        {{ form.name(class="form-control") }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">负责人</label>
+        {{ form.leader_user_id(class="form-select") }}
+        <div class="form-text">负责人会自动加入项目成员。</div>
+      </div>
+
+      {% if mode=='edit' %}
+        <div class="row g-3 mb-1">
+          <div class="col-md-6">
+            <label class="form-label">计划开始日期</label>
+            <input class="form-control" type="text" value="{{ project.planned_start_date }}" disabled>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">计划结束日期（终止时间）</label>
+            <input class="form-control" type="text" value="{{ project.planned_end_date }}" disabled>
+          </div>
+        </div>
+        <div class="alert alert-info py-2 small mb-3">
+          计划结束日期请在项目详情页通过 <strong>全员同意</strong> 的流程修改。
+        </div>
+        {# keep fields present for WTForms validation #}
+        <div class="d-none">
+          {{ form.planned_start_date() }}
+          {{ form.planned_end_date() }}
+        </div>
+      {% else %}
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">计划开始日期</label>
+            {{ form.planned_start_date(class="form-control") }}
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">计划结束日期（终止时间）</label>
+            {{ form.planned_end_date(class="form-control") }}
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="mb-3">
+        <label class="form-label">合同金额（元）</label>
+        {{ form.expected_income_yuan(class="form-control") }}
+        <div class="form-text">
+          这里统一填写 <strong>客户合同总价（我方+中介的总价）</strong>。<br>
+          「中介从客户款中扣除」时：收入流水建议记 <strong>我方实际到帐净额</strong>；系统会按中介设置推算拆分与剩余。
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">{{ form.broker_fee_direction.label.text }}</label>
+        {{ form.broker_fee_direction(class="form-select") }}
+      </div>
+      <div class="mb-3">
+        <label class="form-label">{{ form.broker_fee_mode.label.text }}</label>
+        {{ form.broker_fee_mode(class="form-select", id="broker_fee_mode") }}
+      </div>
+      <div class="mb-3">
+        <label class="form-label">{{ form.referral_ratio_percent.label.text }}</label>
+        {{ form.referral_ratio_percent(class="form-control") }}
+        <div class="form-text">按比例时使用；固定金额模式可填 0。净额模式下为占等价客户全额的比例。</div>
+      </div>
+      <div class="mb-3" id="broker_fixed_fee_wrap">
+        <label class="form-label">{{ form.broker_fixed_fee_yuan.label.text }}</label>
+        {{ form.broker_fixed_fee_yuan(class="form-control", id="broker_fixed_fee_yuan") }}
+        <div class="form-text" id="broker_fixed_fee_hint">固定金额模式填写；「我方另付」时表示项目总中介费用（不超过合同全额）。</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">状态</label>
+        {{ form.status(class="form-select") }}
+      </div>
+      <div class="mb-3">
+        <label class="form-label">项目成员</label>
+        <div class="row g-2">
+          {% for value, label in form.member_user_ids.choices %}
+            <div class="col-6 col-md-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="{{ form.member_user_ids.name }}" value="{{ value }}"
+                  {% if form.member_user_ids.data and (value in form.member_user_ids.data) %}checked{% endif %}>
+                <label class="form-check-label">{{ label }}</label>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="form-text">删除项目需要项目所有成员同意。</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">备注</label>
+        {{ form.note(class="form-control", rows="4") }}
+      </div>
+      <button class="btn btn-primary" type="submit">保存</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('main.projects_list') }}">返回</a>
+    </div>
+  </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var modeEl = document.getElementById('broker_fee_mode');
+  var fixedEl = document.getElementById('broker_fixed_fee_yuan');
+  var hintEl = document.getElementById('broker_fixed_fee_hint');
+  var wrapEl = document.getElementById('broker_fixed_fee_wrap');
+  if (!modeEl || !fixedEl) return;
+  var hintFixed = '固定金额模式填写；「我方另付」时表示项目总中介费用（不超过合同全额）。';
+  var hintPercent = '当前为按比例分成，固定费用不可用（保存时自动按 0 处理）。';
+  function sync() {
+    var isPercent = modeEl.value === 'percent';
+    fixedEl.disabled = isPercent;
+    if (wrapEl) wrapEl.classList.toggle('opacity-50', isPercent);
+    if (isPercent) {
+      fixedEl.value = '';
+      if (hintEl) hintEl.textContent = hintPercent;
+    } else {
+      if (hintEl) hintEl.textContent = hintFixed;
+    }
+  }
+  modeEl.addEventListener('change', sync);
+  sync();
+})();
+</script>
+{% endblock %}
+

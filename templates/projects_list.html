@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}项目 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h4 mb-0">项目</h1>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('main.projects_new') }}">新建项目</a>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>项目</th>
+          <th>状态</th>
+          <th class="text-end">客户侧/等价全额</th>
+          <th class="text-end">我方净应收（元）</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.project.name }}</td>
+            <td>
+              {% if row.project.status == 'open' %}
+                <span class="badge text-bg-success">进行中</span>
+              {% else %}
+                <span class="badge text-bg-secondary">已结束</span>
+              {% endif %}
+            </td>
+            <td class="text-end">¥ {{ '%.2f'|format(row.finance.contract_display_gross_equiv_cents/100) }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(row.expected_net_cents/100) }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=row.project.id) }}">详情</a>
+              {% if is_admin %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=row.project.id) }}">编辑</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-muted">暂无项目</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pagination.pages > 1 %}
+    <nav class="mt-2" aria-label="项目分页">
+      <ul class="pagination pagination-sm justify-content-center mb-0">
+        {% if pagination.has_prev %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.projects_list', page=pagination.prev_num) }}">上一页</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">上一页</span></li>
+        {% endif %}
+        <li class="page-item disabled"><span class="page-link">{{ pagination.page }} / {{ pagination.pages }}</span></li>
+        {% if pagination.has_next %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.projects_list', page=pagination.next_num) }}">下一页</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">下一页</span></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+{% endblock %}
+

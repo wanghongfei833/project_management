@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}修改流水 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <h1 class="h4 mb-1">修改流水（需项目全员同意）</h1>
+      <div class="text-muted small">
+        项目：<span class="fw-semibold">{{ project.name }}</span>
+        · 流水 ID：<span class="fw-semibold">{{ transaction.id }}</span>
+      </div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=project.id) }}">返回项目</a>
+  </div>
+
+  <div class="alert alert-info">
+    提交后将创建“修改申请”。流水字段在<strong>「全体项目成员均已同意」或「至少一名管理员已点同意修改」</strong>后，由管理员点击「执行修改」生效。
+    <strong>凭证</strong>：勾选下方「删除」并提交、或选择新文件上传，会在<strong>本次提交时立即生效</strong>（与字段审批流程无关）。
+  </div>
+
+  <form method="post" enctype="multipart/form-data" class="card">
+    <div class="card-body">
+      {{ form.hidden_tag() }}
+
+      {% if transaction.attachments %}
+        <div class="card mb-3">
+          <div class="card-body py-2">
+            <div class="fw-semibold small mb-2">已有凭证（可勾选删除）</div>
+            <ul class="list-unstyled mb-0 small">
+              {% for a in transaction.attachments %}
+                <li class="d-flex flex-wrap align-items-center gap-2 py-1 border-bottom">
+                  <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a>
+                  <div class="form-check ms-auto">
+                    <input class="form-check-input" type="checkbox" name="delete_attachment_ids" value="{{ a.id }}" id="del-att-{{ a.id }}">
+                    <label class="form-check-label text-danger" for="del-att-{{ a.id }}">删除</label>
+                  </div>
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="row g-3">
+        <div class="col-md-3">
+          <label class="form-label">类型</label>
+          {{ form.type(class="form-select") }}
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">金额（元）</label>
+          {{ form.amount_yuan(class="form-control") }}
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">发生日期</label>
+          {{ form.occur_date(class="form-control") }}
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+          <div class="form-check">
+            {{ form.settled(class="form-check-input") }}
+            <label class="form-check-label">已到账/已付款</label>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label">对方</label>
+          {{ form.counterparty(class="form-control") }}
+        </div>
+        <div class="col-12">
+          <label class="form-label">备注</label>
+          {{ form.note(class="form-control", rows="3") }}
+        </div>
+        <div class="col-12">
+          <label class="form-label">追加凭证（可选，可多选）</label>
+          <input class="form-control" type="file" name="attachments" multiple>
+        </div>
+      </div>
+
+      <div class="mt-3 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">提交修改申请</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=project.id) }}">取消</a>
+      </div>
+    </div>
+  </form>
+{% endblock %}

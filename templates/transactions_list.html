@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}流水 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h4 mb-0">流水</h1>
+    {% if is_admin %}
+      <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new') }}">新增流水</a>
+    {% endif %}
+  </div>
+
+  <form class="row g-2 align-items-end mb-3" method="get">
+    <div class="col-sm-6 col-md-4">
+      <label class="form-label small text-muted">按项目筛选</label>
+      <select name="project_id" class="form-select form-select-sm">
+        <option value="">全部</option>
+        {% for p in projects %}
+          <option value="{{ p.id }}" {% if current_project_id==p.id %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-sm btn-outline-secondary" type="submit">筛选</button>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>日期</th>
+          <th>项目</th>
+          <th>类型</th>
+          <th class="text-end">金额</th>
+          <th>状态</th>
+          <th>对方</th>
+          <th>凭证</th>
+          <th class="text-end">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in transactions %}
+          <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
+            <td>{{ t.occur_date }}</td>
+            <td>{{ t.project.name if t.project else '（无）' }}</td>
+            <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(t.amount_cents/100) }}</td>
+            <td>{{ '已结算' if t.settled else '未结算' }}</td>
+            <td>{{ t.counterparty or '' }}</td>
+            <td>
+              {% for a in t.attachments %}
+                <div><a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a></div>
+              {% else %}
+                <span class="text-muted">无</span>
+              {% endfor %}
+            </td>
+            <td class="text-end">
+              {% set ereq = edit_req_by_tx.get(t.id) %}
+              {% if ereq %}
+                {% set mc = member_count_by_project.get(t.project_id, 0) %}
+                <div class="small text-muted mb-1">
+                  修改审批：{{ ereq.approvals|length }} / {{ mc }}
+                </div>
+                {% if edit_ready_by_tx.get(t.id) %}
+                  <span class="badge text-bg-success">已全部同意</span>
+                {% else %}
+                  <span class="badge text-bg-warning">审批中</span>
+                {% endif %}
+              {% elif is_admin and t.project_id %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.transactions_edit', transaction_id=t.id) }}">修改</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="text-muted">暂无流水</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pagination.pages > 1 %}
+    <nav class="mt-2" aria-label="流水分页">
+      <ul class="pagination pagination-sm justify-content-center mb-0">
+        {% if pagination.has_prev %}
+          <li class="page-item">
+            {% if current_project_id %}
+              <a class="page-link" href="{{ url_for('main.transactions_list', page=pagination.prev_num, project_id=current_project_id) }}">上一页</a>
+            {% else %}
+              <a class="page-link" href="{{ url_for('main.transactions_list', page=pagination.prev_num) }}">上一页</a>
+            {% endif %}
+          </li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">上一页</span></li>
+        {% endif %}
+        <li class="page-item disabled"><span class="page-link">{{ pagination.page }} / {{ pagination.pages }}（共 {{ pagination.total }} 条）</span></li>
+        {% if pagination.has_next %}
+          <li class="page-item">
+            {% if current_project_id %}
+              <a class="page-link" href="{{ url_for('main.transactions_list', page=pagination.next_num, project_id=current_project_id) }}">下一页</a>
+            {% else %}
+              <a class="page-link" href="{{ url_for('main.transactions_list', page=pagination.next_num) }}">下一页</a>
+            {% endif %}
+          </li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">下一页</span></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+{% endblock %}
+

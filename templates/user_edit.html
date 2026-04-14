@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}编辑用户 - 项目账本{% endblock %}
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start mb-3">
+            <div>
+              <h1 class="h4 mb-1">编辑用户</h1>
+              <div class="text-muted small">用户名：<span class="fw-semibold">{{ user.username }}</span></div>
+            </div>
+            <button
+              class="btn btn-sm btn-outline-danger"
+              type="button"
+              data-bs-toggle="modal"
+              data-bs-target="#resetModal"
+              data-user-id="{{ user.id }}"
+              data-username="{{ user.username }}"
+            >重置密码</button>
+          </div>
+
+          <form method="post">
+            {{ form.hidden_tag() }}
+
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">角色</label>
+                {{ form.role(class="form-select") }}
+              </div>
+              <div class="col-md-6 d-flex align-items-end">
+                <div class="form-check">
+                  {{ form.is_active(class="form-check-input") }}
+                  <label class="form-check-label">启用账号</label>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-3 d-flex gap-2">
+              <button class="btn btn-primary" type="submit">保存</button>
+              <a class="btn btn-outline-secondary" href="{{ url_for('main.users_list') }}">返回</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="resetModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">重置密码</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="text-muted small mb-2">目标用户：<span id="resetUsername" class="fw-semibold"></span></div>
+          <label class="form-label">请输入你的管理员密码以确认</label>
+          <input class="form-control" type="password" id="adminPassword" autocomplete="current-password">
+          <div class="invalid-feedback d-block" id="resetError"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="button" class="btn btn-danger" id="resetConfirmBtn">确认重置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+  const resetModal = document.getElementById('resetModal');
+  let resetUserId = null;
+
+  resetModal.addEventListener('show.bs.modal', (event) => {
+    const btn = event.relatedTarget;
+    resetUserId = btn.getAttribute('data-user-id');
+    document.getElementById('resetUsername').textContent = btn.getAttribute('data-username');
+    document.getElementById('adminPassword').value = '';
+    document.getElementById('resetError').textContent = '';
+  });
+
+  document.getElementById('resetConfirmBtn').addEventListener('click', async () => {
+    const adminPassword = document.getElementById('adminPassword').value;
+    const err = document.getElementById('resetError');
+    err.textContent = '';
+
+    if (!resetUserId) return;
+
+    const body = new URLSearchParams();
+    body.set('admin_password', adminPassword);
+    body.set('csrf_token', csrf);
+
+    const resp = await fetch(`/users/${resetUserId}/reset-password`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': csrf },
+      body
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      err.textContent = data.error || '重置失败';
+      return;
+    }
+
+    const modal = bootstrap.Modal.getInstance(resetModal);
+    modal.hide();
+
+    alert(`密码已重置为：${data.new_password}`);
+  });
+</script>
+{% endblock %}
