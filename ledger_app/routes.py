@@ -1756,26 +1756,29 @@ def transactions_list():
 @bp.route("/transactions/new", methods=["GET", "POST"])
 @login_required
 def transactions_new():
-    if not is_admin():
-        flash("无权限", "danger")
-        return redirect(url_for("main.transactions_list"))
-
     form = TransactionForm()
-    projects = Project.query.order_by(Project.name.asc()).all()
+    projects = _accessible_projects_query().order_by(Project.name.asc()).all()
     if not projects:
-        flash("暂无项目，请先创建项目后再登记流水。", "warning")
+        flash("暂无可登记流水的项目：请先加入某项目或由管理员创建项目。", "warning")
         return redirect(url_for("main.projects_list"))
 
     form.project_id.choices = [(p.id, p.name) for p in projects]
+    allowed_ids = {int(p.id) for p in projects}
     default_pid = request.args.get("project_id", type=int)
     if request.method == "GET":
-        if default_pid and any(p.id == default_pid for p in projects):
+        if default_pid and default_pid in allowed_ids:
             form.project_id.data = int(default_pid)
         else:
             form.project_id.data = int(projects[0].id)
 
     if form.validate_on_submit():
         pid = int(form.project_id.data)
+        if pid not in allowed_ids:
+            flash("所选项目不在你的可访问范围内。", "danger")
+            return render_template("transaction_form.html", form=form, is_admin=is_admin())
+        if not is_admin() and not _is_project_member(pid, current_user.id):
+            flash("你不是该项目成员，不能在该项目下登记流水。", "danger")
+            return render_template("transaction_form.html", form=form, is_admin=is_admin())
         if not db.session.get(Project, pid):
             flash("所选项目不存在", "warning")
             return render_template("transaction_form.html", form=form, is_admin=is_admin())

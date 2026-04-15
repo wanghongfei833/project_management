@@ -6,13 +6,13 @@
       <h1 class="h4 mb-1">{{ project.name }}</h1>
       <div class="text-muted small">状态：{{ '进行中' if project.status == 'open' else '已结束' }}</div>
     </div>
-    {% if is_admin %}
-      <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
+      {% if is_admin %}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=project.id) }}">编辑项目</a>
         <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.project_adjust', project_id=project.id) }}">追加应收</a>
-        <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new', project_id=project.id) }}">新增流水</a>
-      </div>
-    {% endif %}
+      {% endif %}
+      <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new', project_id=project.id) }}">新增流水</a>
+    </div>
   </div>
 
   <div class="card mb-4">

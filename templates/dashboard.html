@@ -8,9 +8,7 @@
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.projects_new') }}">新建项目</a>
-      {% if is_admin %}
-        <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new') }}">新增流水</a>
-      {% endif %}
+      <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new') }}">新增流水</a>
     </div>
   </div>
 
