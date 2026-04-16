@@ -60,6 +60,10 @@ from .models import (
     ProjectUpdateAttachment,
     Role,
     Transaction,
+    TransactionCreateApproval,
+    TransactionCreateRequest,
+    TransactionDeleteApproval,
+    TransactionDeleteRequest,
     TransactionEditApproval,
     TransactionEditRequest,
     TransactionType,
@@ -79,6 +83,11 @@ DEFAULT_NEW_USER_PASSWORD = "123456!"
 
 def is_admin() -> bool:
     return getattr(current_user, "role", None) == Role.ADMIN.value
+
+
+def _admin_user_ids() -> set[int]:
+    rows = db.session.query(User.id).filter(User.role == Role.ADMIN.value).all()
+    return {int(r[0]) for r in rows}
 
 
 def _accessible_projects_query():
@@ -269,8 +278,17 @@ def users_reset_password(user_id: int):
         return jsonify({"ok": False, "error": "管理员密码不正确"}), 400
 
     u.set_password(DEFAULT_NEW_USER_PASSWORD)
+    # 重置密码时通常也希望恢复可登录状态（避免“重置成功但仍无法登录”）。
+    u.is_active = True
     db.session.commit()
-    return jsonify({"ok": True, "new_password": DEFAULT_NEW_USER_PASSWORD})
+    return jsonify(
+        {
+            "ok": True,
+            "username": u.username,
+            "new_password": DEFAULT_NEW_USER_PASSWORD,
+            "is_active": bool(u.is_active),
+        }
+    )
 
 
 @bp.get("/health")
@@ -286,7 +304,13 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         user = User.query.filter_by(username=form.username.data).first()
-        if not user or not user.is_active or not user.check_password(form.password.data):
+        if not user:
+            flash("用户名或密码错误", "danger")
+            return render_template("login.html", form=form)
+        if not user.is_active:
+            flash("账号已被禁用，请联系管理员启用后再登录。", "danger")
+            return render_template("login.html", form=form)
+        if not user.check_password(form.password.data):
             flash("用户名或密码错误", "danger")
             return render_template("login.html", form=form)
         login_user(user)
@@ -309,6 +333,7 @@ def dashboard():
         Transaction.type == TransactionType.INCOME.value,
         Transaction.settled.is_(True),
         Transaction.is_void.is_(False),
+        Transaction.status == "active",
         Transaction.project_id.isnot(None),
     )
     income_q = _apply_transaction_project_access_filter(income_q)
@@ -317,6 +342,7 @@ def dashboard():
         Transaction.type == TransactionType.EXPENSE.value,
         Transaction.settled.is_(True),
         Transaction.is_void.is_(False),
+        Transaction.status == "active",
         Transaction.project_id.isnot(None),
     )
     expense_q = _apply_transaction_project_access_filter(expense_q)
@@ -332,6 +358,7 @@ def dashboard():
                 Transaction.type == TransactionType.INCOME.value,
                 Transaction.settled.is_(True),
                 Transaction.is_void.is_(False),
+                Transaction.status == "active",
             )
             .scalar()
         )
@@ -412,6 +439,7 @@ def reports():
     income_cents_q = db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0)).filter(
         Transaction.type == TransactionType.INCOME.value,
         Transaction.is_void.is_(False),
+        Transaction.status == "active",
         Transaction.settled.is_(True),
         Transaction.project_id.isnot(None),
         Transaction.occur_date >= start_d,
@@ -422,6 +450,7 @@ def reports():
     expense_cents_q = db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0)).filter(
         Transaction.type == TransactionType.EXPENSE.value,
         Transaction.is_void.is_(False),
+        Transaction.status == "active",
         Transaction.settled.is_(True),
         Transaction.project_id.isnot(None),
         Transaction.occur_date >= start_d,
@@ -444,6 +473,7 @@ def reports():
         Transaction.occur_date, Transaction.type, db.func.sum(Transaction.amount_cents)
     ).filter(
         Transaction.is_void.is_(False),
+        Transaction.status == "active",
         Transaction.settled.is_(True),
         Transaction.project_id.isnot(None),
         Transaction.occur_date >= start_d,
@@ -471,6 +501,7 @@ def reports():
     ).filter(
         Transaction.type == TransactionType.EXPENSE.value,
         Transaction.is_void.is_(False),
+        Transaction.status == "active",
         Transaction.settled.is_(True),
         Transaction.project_id.isnot(None),
         Transaction.occur_date >= start_d,
@@ -491,6 +522,7 @@ def reports():
         joinedload(Transaction.project), joinedload(Transaction.attachments)
     ).filter(
         Transaction.is_void.is_(False),
+        Transaction.status == "active",
         Transaction.settled.is_(True),
         Transaction.project_id.isnot(None),
         Transaction.occur_date >= start_d,
@@ -552,6 +584,7 @@ def projects_new():
     users = User.query.filter_by(is_active=True).order_by(User.username.asc()).all()
     form.member_user_ids.choices = [(u.id, u.username) for u in users]
     form.leader_user_id.choices = [(u.id, u.username) for u in users]
+    admin_user_ids = _admin_user_ids()
     if form.validate_on_submit():
         if form.planned_end_date.data < form.planned_start_date.data:
             flash("计划结束日期不能早于开始日期", "warning")
@@ -597,6 +630,7 @@ def projects_new():
         db.session.flush()
 
         member_ids = set(form.member_user_ids.data or [])
+        member_ids.update(admin_user_ids)  # admin 必须在项目内
         member_ids.add(current_user.id)  # 创建人必须是成员
         member_ids.add(int(form.leader_user_id.data))  # 负责人必须是成员
         for uid in member_ids:
@@ -614,7 +648,7 @@ def projects_new():
     # default
     if request.method == "GET":
         form.referral_ratio_percent.data = Decimal("0")
-        form.member_user_ids.data = [current_user.id]
+        form.member_user_ids.data = sorted({current_user.id, *admin_user_ids})
         form.leader_user_id.data = current_user.id
         form.planned_start_date.data = date.today()
         form.planned_end_date.data = date.today()
@@ -622,7 +656,12 @@ def projects_new():
         form.broker_fee_direction.data = BROKER_DIR_WE_PAY
         form.broker_fixed_fee_yuan.data = Decimal("0")
 
-    return render_template("project_form.html", form=form, is_admin=is_admin())
+    return render_template(
+        "project_form.html",
+        form=form,
+        is_admin=is_admin(),
+        admin_user_ids=admin_user_ids,
+    )
 
 
 @bp.route("/projects/<int:project_id>/edit", methods=["GET", "POST"])
@@ -641,6 +680,7 @@ def projects_edit(project_id: int):
     users = User.query.filter_by(is_active=True).order_by(User.username.asc()).all()
     form.member_user_ids.choices = [(u.id, u.username) for u in users]
     form.leader_user_id.choices = [(u.id, u.username) for u in users]
+    admin_user_ids = _admin_user_ids()
     if request.method == "GET":
         form.name.data = p.name
         form.leader_user_id.data = int(p.leader_user_id) if p.leader_user_id else current_user.id
@@ -712,6 +752,7 @@ def projects_edit(project_id: int):
         p.note = form.note.data or None
 
         new_member_ids = set(form.member_user_ids.data or [])
+        new_member_ids.update(admin_user_ids)  # admin 不可移出项目
         new_member_ids.add(current_user.id)
         new_member_ids.add(int(p.leader_user_id))
         existing = ProjectMember.query.filter_by(project_id=p.id).all()
@@ -738,6 +779,7 @@ def projects_edit(project_id: int):
         is_admin=is_admin(),
         mode="edit",
         project=p,
+        admin_user_ids=admin_user_ids,
     )
 
 
@@ -770,6 +812,57 @@ def _open_transaction_edit_request(transaction_id: int) -> TransactionEditReques
     )
 
 
+def _open_transaction_delete_request(transaction_id: int) -> TransactionDeleteRequest | None:
+    return (
+        TransactionDeleteRequest.query.filter_by(
+            transaction_id=transaction_id, status="open"
+        )
+        .order_by(TransactionDeleteRequest.id.desc())
+        .first()
+    )
+
+
+def _transaction_delete_fully_approved(req: TransactionDeleteRequest) -> bool:
+    member_ids = _project_member_user_ids(req.project_id)
+    approved_ids = {a.user_id for a in req.approvals}
+    return bool(member_ids) and member_ids.issubset(approved_ids)
+
+
+def _transaction_delete_can_execute(req: TransactionDeleteRequest) -> bool:
+    # admin 绝对权力：可随时执行
+    if is_admin():
+        return True
+    approved_ids = {a.user_id for a in req.approvals}
+    if _approval_user_ids_include_any_admin(approved_ids):
+        return True
+    return _transaction_delete_fully_approved(req)
+
+
+def _open_transaction_create_request(transaction_id: int) -> TransactionCreateRequest | None:
+    return (
+        TransactionCreateRequest.query.filter_by(
+            transaction_id=transaction_id, status="open"
+        )
+        .order_by(TransactionCreateRequest.id.desc())
+        .first()
+    )
+
+
+def _transaction_create_fully_approved(req: TransactionCreateRequest) -> bool:
+    member_ids = _project_member_user_ids(req.project_id)
+    approved_ids = {a.user_id for a in req.approvals}
+    return bool(member_ids) and member_ids.issubset(approved_ids)
+
+
+def _transaction_create_can_execute(req: TransactionCreateRequest) -> bool:
+    if is_admin():
+        return True
+    approved_ids = {a.user_id for a in req.approvals}
+    if _approval_user_ids_include_any_admin(approved_ids):
+        return True
+    return _transaction_create_fully_approved(req)
+
+
 def _approval_user_ids_include_any_admin(user_ids: set[int]) -> bool:
     """审批记录里是否包含至少一名管理员账号（用于「全员同意 或 管理员同意」）。"""
     if not user_ids:
@@ -790,7 +883,9 @@ def _transaction_edit_fully_approved(req: TransactionEditRequest) -> bool:
 
 
 def _transaction_edit_can_execute(req: TransactionEditRequest) -> bool:
-    """满足其一即可由管理员执行：全体成员已同意，或至少一名管理员已点「同意修改」。"""
+    """审核通过：全体成员同意 或 管理员同意；管理员可随时执行（绝对权力）。"""
+    if is_admin():
+        return True
     approved_ids = {a.user_id for a in req.approvals}
     if _approval_user_ids_include_any_admin(approved_ids):
         return True
@@ -872,6 +967,8 @@ def _project_end_date_change_fully_approved(req: ProjectEndDateChangeRequest) ->
 def _project_end_date_change_can_execute(req: ProjectEndDateChangeRequest | None) -> bool:
     if not req:
         return False
+    if is_admin():
+        return True
     approved_ids = {a.user_id for a in req.approvals}
     if _approval_user_ids_include_any_admin(approved_ids):
         return True
@@ -1001,10 +1098,6 @@ def project_end_date_change_approve(project_id: int):
 @bp.post("/projects/<int:project_id>/end-date-change-execute")
 @login_required
 def project_end_date_change_execute(project_id: int):
-    if not is_admin():
-        flash("无权限", "danger")
-        return redirect(url_for("main.project_detail", project_id=project_id))
-
     p = db.session.get(Project, project_id)
     if not p:
         flash("项目不存在", "warning")
@@ -1318,10 +1411,6 @@ def projects_delete_approve(project_id: int):
 @bp.post("/projects/<int:project_id>/delete-execute")
 @login_required
 def projects_delete_execute(project_id: int):
-    if not is_admin():
-        flash("无权限", "danger")
-        return redirect(url_for("main.project_detail", project_id=project_id))
-
     p = db.session.get(Project, project_id)
     if not p:
         flash("项目不存在", "warning")
@@ -1335,8 +1424,10 @@ def projects_delete_execute(project_id: int):
     members = ProjectMember.query.filter_by(project_id=p.id).all()
     member_ids = {m.user_id for m in members}
     approved_ids = {a.user_id for a in req.approvals}
-    if not member_ids.issubset(approved_ids) and not _approval_user_ids_include_any_admin(
-        approved_ids
+    if (
+        not is_admin()
+        and not member_ids.issubset(approved_ids)
+        and not _approval_user_ids_include_any_admin(approved_ids)
     ):
         flash(
             "须全体项目成员同意删除，或至少一名管理员在「同意删除」中确认后，才能执行删除。",
@@ -1477,10 +1568,20 @@ def project_detail(project_id: int):
     tx_pagination = (
         Transaction.query.options(joinedload(Transaction.attachments))
         .filter_by(project_id=p.id)
+        .filter(Transaction.is_void.is_(False), Transaction.status == "active")
         .order_by(Transaction.occur_date.desc(), Transaction.id.desc())
         .paginate(page=tx_page, per_page=40, error_out=False)
     )
     txs = tx_pagination.items
+
+    pending_txs = (
+        Transaction.query.options(joinedload(Transaction.attachments))
+        .filter_by(project_id=p.id)
+        .filter(Transaction.is_void.is_(False), Transaction.status == "pending")
+        .order_by(Transaction.created_at.desc(), Transaction.id.desc())
+        .limit(50)
+        .all()
+    )
     open_edit_reqs = (
         TransactionEditRequest.query.filter_by(project_id=p.id, status="open")
         .order_by(TransactionEditRequest.id.desc())
@@ -1491,6 +1592,42 @@ def project_detail(project_id: int):
     edit_can_execute_by_tx = {
         tid: _transaction_edit_can_execute(r) for tid, r in edit_req_by_tx.items()
     }
+
+    open_delete_reqs = (
+        TransactionDeleteRequest.query.filter_by(project_id=p.id, status="open")
+        .order_by(TransactionDeleteRequest.id.desc())
+        .all()
+    )
+    delete_req_by_tx = {r.transaction_id: r for r in open_delete_reqs}
+    delete_ready_by_tx = {
+        tid: _transaction_delete_fully_approved(r) for tid, r in delete_req_by_tx.items()
+    }
+    delete_can_execute_by_tx = {
+        tid: _transaction_delete_can_execute(r) for tid, r in delete_req_by_tx.items()
+    }
+
+    pending_create_req_by_tx: dict[int, TransactionCreateRequest] = {}
+    create_ready_by_tx: dict[int, bool] = {}
+    create_can_execute_by_tx: dict[int, bool] = {}
+    if pending_txs:
+        pending_ids = [int(t.id) for t in pending_txs]
+        open_creqs = (
+            TransactionCreateRequest.query.filter(
+                TransactionCreateRequest.transaction_id.in_(pending_ids),
+                TransactionCreateRequest.status == "open",
+            )
+            .order_by(TransactionCreateRequest.id.desc())
+            .all()
+        )
+        pending_create_req_by_tx = {int(r.transaction_id): r for r in open_creqs}
+        create_ready_by_tx = {
+            tid: _transaction_create_fully_approved(r)
+            for tid, r in pending_create_req_by_tx.items()
+        }
+        create_can_execute_by_tx = {
+            tid: _transaction_create_can_execute(r)
+            for tid, r in pending_create_req_by_tx.items()
+        }
     adjustments = (
         ProjectExpectedIncomeAdjustment.query.filter_by(project_id=p.id)
         .order_by(ProjectExpectedIncomeAdjustment.created_at.desc())
@@ -1521,6 +1658,7 @@ def project_detail(project_id: int):
             Transaction.type == TransactionType.INCOME.value,
             Transaction.settled.is_(True),
             Transaction.is_void.is_(False),
+            Transaction.status == "active",
         )
         .scalar()
         or 0
@@ -1532,6 +1670,7 @@ def project_detail(project_id: int):
             Transaction.type == TransactionType.EXPENSE.value,
             Transaction.settled.is_(True),
             Transaction.is_void.is_(False),
+            Transaction.status == "active",
         )
         .scalar()
         or 0
@@ -1543,6 +1682,7 @@ def project_detail(project_id: int):
             Transaction.type == TransactionType.EXPENSE.value,
             Transaction.settled.is_(True),
             Transaction.is_void.is_(False),
+            Transaction.status == "active",
             db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"),
         )
         .scalar()
@@ -1661,9 +1801,16 @@ def project_detail(project_id: int):
         project_updates=project_updates,
         update_form=update_form,
         transactions=txs,
+        pending_transactions=pending_txs,
+        create_req_by_tx=pending_create_req_by_tx,
+        create_ready_by_tx=create_ready_by_tx,
+        create_can_execute_by_tx=create_can_execute_by_tx,
         edit_req_by_tx=edit_req_by_tx,
         edit_ready_by_tx=edit_ready_by_tx,
         edit_can_execute_by_tx=edit_can_execute_by_tx,
+        delete_req_by_tx=delete_req_by_tx,
+        delete_ready_by_tx=delete_ready_by_tx,
+        delete_can_execute_by_tx=delete_can_execute_by_tx,
         adjustments=adjustments,
         members=members,
         delete_req=delete_req,
@@ -1699,7 +1846,9 @@ def project_detail(project_id: int):
 @login_required
 def transactions_list():
     q = Transaction.query.filter(
-        Transaction.is_void.is_(False), Transaction.project_id.isnot(None)
+        Transaction.is_void.is_(False),
+        Transaction.status == "active",
+        Transaction.project_id.isnot(None),
     )
     q = _apply_transaction_project_access_filter(q)
     project_id = request.args.get("project_id", type=int)
@@ -1782,8 +1931,10 @@ def transactions_new():
         if not db.session.get(Project, pid):
             flash("所选项目不存在", "warning")
             return render_template("transaction_form.html", form=form, is_admin=is_admin())
+        tx_status = "active" if is_admin() else "pending"
         tx = Transaction(
             project_id=pid,
+            status=tx_status,
             type=form.type.data,
             amount_cents=yuan_to_cents(form.amount_yuan.data),
             occur_date=form.occur_date.data,
@@ -1797,17 +1948,40 @@ def transactions_new():
 
         added = _save_transaction_attachments(tx)
         typ = "收入" if tx.type == TransactionType.INCOME.value else "支出"
-        _log_project_activity(
-            pid,
-            "transaction.create",
-            f"新增流水 #{tx.id}：{typ} ¥{cents_to_yuan(int(tx.amount_cents))}，日期 {tx.occur_date}"
-            + (f"，附件 {added} 个" if added else ""),
-        )
-        db.session.commit()
-        if added:
-            flash(f"流水已新增，已保存 {added} 个凭证文件。", "success")
+        if tx_status == "pending":
+            creq = TransactionCreateRequest(
+                transaction_id=tx.id,
+                project_id=pid,
+                status="open",
+                created_by_user_id=current_user.id,
+            )
+            db.session.add(creq)
+            db.session.flush()
+            db.session.add(
+                TransactionCreateApproval(request_id=creq.id, user_id=current_user.id)
+            )
+            _log_project_activity(
+                pid,
+                "transaction.create_request",
+                f"发起新增流水 #{tx.id} 审批：{typ} ¥{cents_to_yuan(int(tx.amount_cents))}，日期 {tx.occur_date}"
+                + (f"，附件 {added} 个" if added else ""),
+                detail=f"request_id={creq.id}",
+            )
         else:
-            flash("流水已新增", "success")
+            _log_project_activity(
+                pid,
+                "transaction.create",
+                f"新增流水 #{tx.id}：{typ} ¥{cents_to_yuan(int(tx.amount_cents))}，日期 {tx.occur_date}"
+                + (f"，附件 {added} 个" if added else ""),
+            )
+        db.session.commit()
+        if tx_status == "pending":
+            flash("已提交新增流水申请，待审核通过后生效。", "success")
+        else:
+            if added:
+                flash(f"流水已新增，已保存 {added} 个凭证文件。", "success")
+            else:
+                flash("流水已新增", "success")
         return redirect(url_for("main.transactions_list"))
 
     return render_template("transaction_form.html", form=form, is_admin=is_admin())
@@ -1816,10 +1990,6 @@ def transactions_new():
 @bp.route("/transactions/<int:transaction_id>/edit", methods=["GET", "POST"])
 @login_required
 def transactions_edit(transaction_id: int):
-    if not is_admin():
-        flash("无权限", "danger")
-        return redirect(url_for("main.transactions_list"))
-
     tx = (
         db.session.query(Transaction)
         .options(joinedload(Transaction.attachments))
@@ -1934,14 +2104,14 @@ def transactions_edit_approve(transaction_id: int):
 @bp.post("/transactions/<int:transaction_id>/edit-execute")
 @login_required
 def transactions_edit_execute(transaction_id: int):
-    if not is_admin():
-        flash("无权限", "danger")
-        return redirect(url_for("main.transactions_list"))
-
     tx = db.session.get(Transaction, transaction_id)
     if not tx or tx.is_void or not tx.project_id:
         flash("流水不存在", "warning")
         return redirect(url_for("main.transactions_list"))
+
+    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
+        flash("你不是该项目成员，无法执行修改", "danger")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     req = _open_transaction_edit_request(tx.id)
     if not req:
@@ -2004,6 +2174,258 @@ def transactions_edit_cancel(transaction_id: int):
     )
     db.session.commit()
     flash("已取消流水修改申请", "success")
+    return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+
+@bp.post("/transactions/<int:transaction_id>/delete-request")
+@login_required
+def transactions_delete_request(transaction_id: int):
+    tx = db.session.get(Transaction, transaction_id)
+    if not tx or tx.is_void or not tx.project_id:
+        flash("流水不存在", "warning")
+        return redirect(url_for("main.transactions_list"))
+    if getattr(tx, "status", "active") != "active":
+        flash("该流水尚未审核生效，无法删除。", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
+        flash("你不是该项目成员，无法发起删除申请", "danger")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    if _open_transaction_delete_request(tx.id):
+        flash("该流水已有待审批的删除申请", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    req = TransactionDeleteRequest(
+        transaction_id=tx.id,
+        project_id=int(tx.project_id),
+        status="open",
+        created_by_user_id=current_user.id,
+    )
+    db.session.add(req)
+    db.session.flush()
+    db.session.add(TransactionDeleteApproval(request_id=req.id, user_id=current_user.id))
+    _log_project_activity(
+        int(tx.project_id),
+        "transaction.delete_request",
+        f"发起流水 #{tx.id} 删除申请",
+        detail=f"request_id={req.id}",
+    )
+    db.session.commit()
+    flash("已提交删除申请，待审核通过后可执行删除。", "success")
+    return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+
+@bp.post("/transactions/<int:transaction_id>/delete-approve")
+@login_required
+def transactions_delete_approve(transaction_id: int):
+    tx = db.session.get(Transaction, transaction_id)
+    if not tx or tx.is_void or not tx.project_id:
+        flash("流水不存在", "warning")
+        return redirect(url_for("main.transactions_list"))
+
+    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
+        flash("你不是该项目成员，无法同意删除", "danger")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    req = _open_transaction_delete_request(tx.id)
+    if not req:
+        flash("没有待审批的删除申请", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    exists = TransactionDeleteApproval.query.filter_by(
+        request_id=req.id, user_id=current_user.id
+    ).first()
+    if exists:
+        flash("你已同意，无需重复操作", "info")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    db.session.add(TransactionDeleteApproval(request_id=req.id, user_id=current_user.id))
+    _log_project_activity(
+        int(tx.project_id),
+        "transaction.delete_approve",
+        f"用户 {current_user.username} 同意删除流水 #{tx.id}",
+        detail=f"request_id={req.id}",
+    )
+    db.session.commit()
+    flash("已同意删除", "success")
+    return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+
+@bp.post("/transactions/<int:transaction_id>/delete-execute")
+@login_required
+def transactions_delete_execute(transaction_id: int):
+    tx = db.session.get(Transaction, transaction_id)
+    if not tx or tx.is_void or not tx.project_id:
+        flash("流水不存在", "warning")
+        return redirect(url_for("main.transactions_list"))
+
+    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
+        flash("你不是该项目成员，无法执行删除", "danger")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    req = _open_transaction_delete_request(tx.id)
+    if not req:
+        flash("没有待审批的删除申请", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    if not _transaction_delete_can_execute(req):
+        flash("未审核通过：需全体成员同意或管理员同意后，才能执行删除。", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    tx.is_void = True
+    req.status = "executed"
+    req.executed_at = datetime.utcnow()
+    req.executed_by_user_id = current_user.id
+    _log_project_activity(
+        int(tx.project_id),
+        "transaction.delete_execute",
+        f"执行删除流水 #{tx.id}",
+        detail=f"request_id={req.id}",
+    )
+    db.session.commit()
+    flash("流水已删除（已作废）", "success")
+    return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+
+@bp.post("/transactions/<int:transaction_id>/delete-cancel")
+@login_required
+def transactions_delete_cancel(transaction_id: int):
+    tx = db.session.get(Transaction, transaction_id)
+    if not tx or tx.is_void or not tx.project_id:
+        flash("流水不存在", "warning")
+        return redirect(url_for("main.transactions_list"))
+
+    req = _open_transaction_delete_request(tx.id)
+    if not req:
+        flash("没有待审批的删除申请", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    if not (is_admin() or req.created_by_user_id == current_user.id):
+        flash("无权限取消该删除申请", "danger")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    req.status = "cancelled"
+    _log_project_activity(
+        int(tx.project_id),
+        "transaction.delete_cancel",
+        f"取消流水 #{tx.id} 的删除申请",
+        detail=f"request_id={req.id}",
+    )
+    db.session.commit()
+    flash("已取消删除申请", "success")
+    return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+
+@bp.post("/transactions/<int:transaction_id>/create-approve")
+@login_required
+def transactions_create_approve(transaction_id: int):
+    tx = db.session.get(Transaction, transaction_id)
+    if not tx or tx.is_void or not tx.project_id:
+        flash("流水不存在", "warning")
+        return redirect(url_for("main.transactions_list"))
+    if getattr(tx, "status", "active") != "pending":
+        flash("该流水不处于待审核状态", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
+        flash("你不是该项目成员，无法同意", "danger")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    req = _open_transaction_create_request(tx.id)
+    if not req:
+        flash("没有待审批的新增申请", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    exists = TransactionCreateApproval.query.filter_by(
+        request_id=req.id, user_id=current_user.id
+    ).first()
+    if exists:
+        flash("你已同意，无需重复操作", "info")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    db.session.add(TransactionCreateApproval(request_id=req.id, user_id=current_user.id))
+    _log_project_activity(
+        int(tx.project_id),
+        "transaction.create_approve",
+        f"用户 {current_user.username} 同意新增流水 #{tx.id}",
+        detail=f"request_id={req.id}",
+    )
+    db.session.commit()
+    flash("已同意新增", "success")
+    return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+
+@bp.post("/transactions/<int:transaction_id>/create-execute")
+@login_required
+def transactions_create_execute(transaction_id: int):
+    tx = db.session.get(Transaction, transaction_id)
+    if not tx or tx.is_void or not tx.project_id:
+        flash("流水不存在", "warning")
+        return redirect(url_for("main.transactions_list"))
+    if getattr(tx, "status", "active") != "pending":
+        flash("该流水不处于待审核状态", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
+        flash("你不是该项目成员，无法执行", "danger")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    req = _open_transaction_create_request(tx.id)
+    if not req:
+        flash("没有待审批的新增申请", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    if not _transaction_create_can_execute(req):
+        flash("未审核通过：需全体成员同意或管理员同意后，才能执行生效。", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    tx.status = "active"
+    req.status = "executed"
+    req.executed_at = datetime.utcnow()
+    req.executed_by_user_id = current_user.id
+    _log_project_activity(
+        int(tx.project_id),
+        "transaction.create_execute",
+        f"执行新增流水 #{tx.id} 生效",
+        detail=f"request_id={req.id}",
+    )
+    db.session.commit()
+    flash("新增流水已生效", "success")
+    return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+
+@bp.post("/transactions/<int:transaction_id>/create-cancel")
+@login_required
+def transactions_create_cancel(transaction_id: int):
+    tx = db.session.get(Transaction, transaction_id)
+    if not tx or tx.is_void or not tx.project_id:
+        flash("流水不存在", "warning")
+        return redirect(url_for("main.transactions_list"))
+    if getattr(tx, "status", "active") != "pending":
+        flash("该流水不处于待审核状态", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    req = _open_transaction_create_request(tx.id)
+    if not req:
+        flash("没有待审批的新增申请", "warning")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    if not (is_admin() or req.created_by_user_id == current_user.id):
+        flash("无权限取消该新增申请", "danger")
+        return redirect(url_for("main.project_detail", project_id=tx.project_id))
+
+    req.status = "cancelled"
+    # 取消新增：将该待审核流水作废，避免进入统计/列表
+    tx.is_void = True
+    _log_project_activity(
+        int(tx.project_id),
+        "transaction.create_cancel",
+        f"取消新增流水 #{tx.id} 申请",
+        detail=f"request_id={req.id}",
+    )
+    db.session.commit()
+    flash("已取消新增申请", "success")
     return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
 

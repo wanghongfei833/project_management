@@ -190,6 +190,119 @@ def ensure_sqlite_schema():
             )
         )
 
+    # Add transactions.status if missing (active/pending)
+    if _table_exists("transactions") and not _column_exists("transactions", "status"):
+        db.session.execute(
+            text(
+                "ALTER TABLE transactions ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'active'"
+            )
+        )
+        db.session.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_transactions_status ON transactions (status)")
+        )
+
+    # Transaction delete requests + approvals
+    if not _table_exists("transaction_delete_requests"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE transaction_delete_requests (
+                  id INTEGER PRIMARY KEY,
+                  transaction_id INTEGER NOT NULL,
+                  project_id INTEGER NOT NULL,
+                  status VARCHAR(16) NOT NULL DEFAULT 'open',
+                  created_by_user_id INTEGER,
+                  created_at DATETIME NOT NULL,
+                  executed_at DATETIME,
+                  executed_by_user_id INTEGER,
+                  FOREIGN KEY(transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+                  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                  FOREIGN KEY(created_by_user_id) REFERENCES users(id),
+                  FOREIGN KEY(executed_by_user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_transaction_delete_requests_transaction_id "
+                "ON transaction_delete_requests (transaction_id)"
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_transaction_delete_requests_project_id "
+                "ON transaction_delete_requests (project_id)"
+            )
+        )
+
+    if not _table_exists("transaction_delete_approvals"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE transaction_delete_approvals (
+                  request_id INTEGER NOT NULL,
+                  user_id INTEGER NOT NULL,
+                  approved_at DATETIME NOT NULL,
+                  PRIMARY KEY (request_id, user_id),
+                  FOREIGN KEY(request_id) REFERENCES transaction_delete_requests(id) ON DELETE CASCADE,
+                  FOREIGN KEY(user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+
+    # Transaction create requests + approvals (for pending transactions)
+    if not _table_exists("transaction_create_requests"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE transaction_create_requests (
+                  id INTEGER PRIMARY KEY,
+                  transaction_id INTEGER NOT NULL,
+                  project_id INTEGER NOT NULL,
+                  status VARCHAR(16) NOT NULL DEFAULT 'open',
+                  created_by_user_id INTEGER,
+                  created_at DATETIME NOT NULL,
+                  executed_at DATETIME,
+                  executed_by_user_id INTEGER,
+                  FOREIGN KEY(transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+                  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                  FOREIGN KEY(created_by_user_id) REFERENCES users(id),
+                  FOREIGN KEY(executed_by_user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_transaction_create_requests_transaction_id "
+                "ON transaction_create_requests (transaction_id)"
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_transaction_create_requests_project_id "
+                "ON transaction_create_requests (project_id)"
+            )
+        )
+
+    if not _table_exists("transaction_create_approvals"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE transaction_create_approvals (
+                  request_id INTEGER NOT NULL,
+                  user_id INTEGER NOT NULL,
+                  approved_at DATETIME NOT NULL,
+                  PRIMARY KEY (request_id, user_id),
+                  FOREIGN KEY(request_id) REFERENCES transaction_create_requests(id) ON DELETE CASCADE,
+                  FOREIGN KEY(user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+
     admin_id = None
     # Backfill: ensure every existing project has at least one member (admin).
     if _table_exists("project_members") and _table_exists("projects") and _table_exists("users"):

@@ -146,7 +146,7 @@ def running_settled_cash_balance_by_transaction_id(project_id: int) -> dict[int,
     """已结算流水累计项目账户余额（收入 +、支出 −），按时间正序逐笔入账后余额。"""
     rows = (
         Transaction.query.filter_by(project_id=project_id)
-        .filter(Transaction.is_void.is_(False))
+        .filter(Transaction.is_void.is_(False), Transaction.status == "active")
         .order_by(Transaction.occur_date.asc(), Transaction.id.asc())
         .all()
     )

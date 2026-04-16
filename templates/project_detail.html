@@ -386,6 +386,79 @@
     </table>
   </div>
 
+  {% if pending_transactions %}
+    <h2 class="h6">待审核流水</h2>
+    <div class="text-muted small mb-2">这些流水尚未计入统计/报表；满足《审核通过》后点击「执行生效」才会进入正式流水。</div>
+    <div class="table-responsive mb-3">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>类型</th>
+            <th class="text-end">金额</th>
+            <th>状态</th>
+            <th>对方</th>
+            <th>备注</th>
+            <th>凭证</th>
+            <th class="text-end">审核</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set member_ids = members|map(attribute='id')|list %}
+          {% for t in pending_transactions %}
+            {% set creq = create_req_by_tx.get(t.id) %}
+            <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
+              <td>{{ t.occur_date }}</td>
+              <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
+              <td class="text-end">¥ {{ '%.2f'|format(t.amount_cents/100) }}</td>
+              <td><span class="badge text-bg-warning">待审核</span></td>
+              <td>{{ t.counterparty or '' }}</td>
+              <td class="text-truncate" style="max-width: 360px;">{{ t.note or '' }}</td>
+              <td>
+                {% for a in t.attachments %}
+                  <div><a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a></div>
+                {% else %}
+                  <span class="text-muted">无</span>
+                {% endfor %}
+              </td>
+              <td class="text-end">
+                {% if creq %}
+                  <div class="small text-muted mb-1">同意：{{ creq.approvals|length }} / {{ members|length }}</div>
+                  {% set approved_ids = creq.approvals|map(attribute='user_id')|list %}
+                  {% if current_user.id in approved_ids %}
+                    <span class="badge text-bg-secondary">你已同意</span>
+                  {% elif current_user.id in member_ids or is_admin %}
+                    <form method="post" action="{{ url_for('main.transactions_create_approve', transaction_id=t.id) }}" class="d-inline">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="btn btn-sm btn-outline-primary" type="submit">同意</button>
+                    </form>
+                  {% endif %}
+
+                  {% if (is_admin or current_user.id in member_ids) and create_can_execute_by_tx.get(t.id) %}
+                    <form method="post" action="{{ url_for('main.transactions_create_execute', transaction_id=t.id) }}" class="d-inline ms-1">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="btn btn-sm btn-success" type="submit">执行生效</button>
+                    </form>
+                  {% endif %}
+
+                  {% if is_admin or creq.created_by_user_id == current_user.id %}
+                    <form method="post" action="{{ url_for('main.transactions_create_cancel', transaction_id=t.id) }}" class="d-inline ms-1"
+                          onsubmit="return confirm('确认取消该新增申请？');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="btn btn-sm btn-outline-secondary" type="submit">取消</button>
+                    </form>
+                  {% endif %}
+                {% else %}
+                  <span class="text-muted small">（无审批记录）</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
   <h2 class="h6">流水（该项目）</h2>
   <div class="text-muted small mb-2">结余列：按时间顺序累计<strong>已结算</strong>流水（收入 +、支出 −）后的项目账户余额；未结算不改变结余。</div>
   {% if tx_pagination.pages > 1 %}
@@ -407,6 +480,7 @@
         </tr>
       </thead>
       <tbody>
+        {% set member_ids = members|map(attribute='id')|list %}
         {% for t in transactions %}
           <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
             <td>{{ t.occur_date }}</td>
@@ -425,6 +499,7 @@
             </td>
             <td class="text-end">
               {% set ereq = edit_req_by_tx.get(t.id) %}
+              {% set dreq = delete_req_by_tx.get(t.id) %}
               {% set mc = members|length %}
 
               {% if ereq %}
@@ -437,7 +512,6 @@
                 <div class="small text-muted mb-2">同意进度：{{ ereq.approvals|length }} / {{ mc }}</div>
 
                 {% set approved_ids = ereq.approvals|map(attribute='user_id')|list %}
-                {% set member_ids = members|map(attribute='id')|list %}
                 {% if current_user.id in approved_ids %}
                   <span class="badge text-bg-secondary">你已同意</span>
                 {% elif current_user.id in member_ids or is_admin %}
@@ -449,7 +523,7 @@
                   <span class="text-muted small">非项目成员</span>
                 {% endif %}
 
-                {% if is_admin and edit_can_execute_by_tx.get(t.id) %}
+                {% if (is_admin or current_user.id in member_ids) and edit_can_execute_by_tx.get(t.id) %}
                   <form method="post" action="{{ url_for('main.transactions_edit_execute', transaction_id=t.id) }}" class="d-inline ms-1">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="btn btn-sm btn-success" type="submit">执行修改</button>
@@ -463,8 +537,45 @@
                     <button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button>
                   </form>
                 {% endif %}
-              {% elif is_admin %}
+              {% elif current_user.id in member_ids or is_admin %}
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.transactions_edit', transaction_id=t.id) }}">修改</a>
+              {% endif %}
+
+              {% if dreq %}
+                <div class="small text-muted mt-2">删除同意：{{ dreq.approvals|length }} / {{ mc }}</div>
+                {% set del_approved_ids = dreq.approvals|map(attribute='user_id')|list %}
+                {% if current_user.id in del_approved_ids %}
+                  <span class="badge text-bg-secondary">你已同意删除</span>
+                {% elif current_user.id in member_ids or is_admin %}
+                  <form method="post" action="{{ url_for('main.transactions_delete_approve', transaction_id=t.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger" type="submit">同意删除</button>
+                  </form>
+                {% endif %}
+
+                {% if (is_admin or current_user.id in member_ids) and delete_can_execute_by_tx.get(t.id) %}
+                  <form method="post" action="{{ url_for('main.transactions_delete_execute', transaction_id=t.id) }}" class="d-inline ms-1"
+                        onsubmit="return confirm('确认删除该流水？删除将作废该记录（可追溯）。');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-danger" type="submit">执行删除</button>
+                  </form>
+                {% endif %}
+
+                {% if is_admin or dreq.created_by_user_id == current_user.id %}
+                  <form method="post" action="{{ url_for('main.transactions_delete_cancel', transaction_id=t.id) }}" class="d-inline ms-1"
+                        onsubmit="return confirm('确认取消该删除申请？');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-secondary" type="submit">取消删除申请</button>
+                  </form>
+                {% endif %}
+              {% else %}
+                {% if current_user.id in member_ids or is_admin %}
+                  <form method="post" action="{{ url_for('main.transactions_delete_request', transaction_id=t.id) }}" class="d-inline ms-1"
+                        onsubmit="return confirm('确认发起删除申请？需审核通过后才能执行删除。');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
+                  </form>
+                {% endif %}
               {% endif %}
             </td>
           </tr>

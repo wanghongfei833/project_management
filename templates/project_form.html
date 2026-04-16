@@ -86,13 +86,14 @@
             <div class="col-6 col-md-4">
               <div class="form-check">
                 <input class="form-check-input" type="checkbox" name="{{ form.member_user_ids.name }}" value="{{ value }}"
-                  {% if form.member_user_ids.data and (value in form.member_user_ids.data) %}checked{% endif %}>
+                  {% if form.member_user_ids.data and (value in form.member_user_ids.data) %}checked{% endif %}
+                  {% if admin_user_ids is defined and (value in admin_user_ids) %}checked disabled{% endif %}>
                 <label class="form-check-label">{{ label }}</label>
               </div>
             </div>
           {% endfor %}
         </div>
-        <div class="form-text">删除项目需要项目所有成员同意。</div>
+        <div class="form-text">管理员账号必须在项目内（不可取消勾选）。删除项目需满足审核流程。</div>
       </div>
       <div class="mb-3">
         <label class="form-label">备注</label>

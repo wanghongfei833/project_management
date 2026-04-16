@@ -55,8 +55,12 @@
         </div>
         <div class="modal-body">
           <div class="text-muted small mb-2">目标用户：<span id="resetUsername" class="fw-semibold"></span></div>
-          <label class="form-label">请输入你的管理员密码以确认</label>
+          <label class="form-label">请输入当前登录账号（{{ current_user.username }}）的密码以确认</label>
           <input class="form-control" type="password" id="adminPassword" autocomplete="current-password">
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="toggleShowAdminPassword" autocomplete="off">
+            <label class="form-check-label" for="toggleShowAdminPassword">显示密码</label>
+          </div>
           <div class="invalid-feedback d-block" id="resetError"></div>
         </div>
         <div class="modal-footer">
@@ -71,6 +75,7 @@
 {% block scripts %}
 <script>
   const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+  const resetUrlTpl = {{ url_for('main.users_reset_password', user_id=0) | tojson }};
 
   const resetModal = document.getElementById('resetModal');
   let resetUserId = null;
@@ -94,22 +99,32 @@
     body.set('admin_password', adminPassword);
     body.set('csrf_token', csrf);
 
-    const resp = await fetch(`/users/${resetUserId}/reset-password`, {
+    const url = resetUrlTpl.replace('/0/reset-password', `/${resetUserId}/reset-password`);
+    const resp = await fetch(url, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'X-CSRFToken': csrf },
       body
     });
-    const data = await resp.json().catch(() => ({}));
+    const text = await resp.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch (e) { data = {}; }
     if (!resp.ok || !data.ok) {
-      err.textContent = data.error || '重置失败';
+      err.textContent = data.error || `重置失败（HTTP ${resp.status}）`;
       return;
     }
 
     const modal = bootstrap.Modal.getInstance(resetModal);
     modal.hide();
 
-    alert(`密码已重置为：${data.new_password}`);
+    alert(`已重置用户：${data.username || ''}\n新密码：${data.new_password}\n账号状态：${data.is_active ? '启用' : '禁用'}`);
+  });
+
+  document.getElementById('toggleShowAdminPassword')?.addEventListener('change', () => {
+    const cb = document.getElementById('toggleShowAdminPassword');
+    const el = document.getElementById('adminPassword');
+    if (!cb || !el) return;
+    el.type = cb.checked ? 'text' : 'password';
   });
 </script>
 {% endblock %}

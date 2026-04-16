@@ -321,6 +321,7 @@ class Transaction(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=True)
+    status = db.Column(db.String(16), nullable=False, default="active", index=True)  # active/pending
     type = db.Column(db.String(16), nullable=False, index=True)
     amount_cents = db.Column(db.BigInteger, nullable=False)
     occur_date = db.Column(db.Date, nullable=False, default=date.today)
@@ -334,6 +335,7 @@ class Transaction(db.Model):
     project = db.relationship("Project", back_populates="transactions")
     attachments = db.relationship("Attachment", back_populates="transaction")
     edit_requests = db.relationship("TransactionEditRequest", back_populates="transaction")
+    delete_requests = db.relationship("TransactionDeleteRequest", back_populates="transaction")
 
 
 class TransactionEditRequest(db.Model):
@@ -383,6 +385,92 @@ class TransactionEditApproval(db.Model):
     approved_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     request = db.relationship("TransactionEditRequest", back_populates="approvals")
+    user = db.relationship("User")
+
+
+class TransactionDeleteRequest(db.Model):
+    __tablename__ = "transaction_delete_requests"
+
+    id = db.Column(db.Integer, primary_key=True)
+    transaction_id = db.Column(
+        db.Integer,
+        db.ForeignKey("transactions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id = db.Column(
+        db.Integer,
+        db.ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status = db.Column(db.String(16), nullable=False, default="open")  # open/executed/cancelled
+
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    executed_at = db.Column(db.DateTime, nullable=True)
+    executed_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    transaction = db.relationship("Transaction", back_populates="delete_requests")
+    project = db.relationship("Project")
+    approvals = db.relationship("TransactionDeleteApproval", back_populates="request")
+
+
+class TransactionDeleteApproval(db.Model):
+    __tablename__ = "transaction_delete_approvals"
+
+    request_id = db.Column(
+        db.Integer,
+        db.ForeignKey("transaction_delete_requests.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    approved_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    request = db.relationship("TransactionDeleteRequest", back_populates="approvals")
+    user = db.relationship("User")
+
+
+class TransactionCreateRequest(db.Model):
+    __tablename__ = "transaction_create_requests"
+
+    id = db.Column(db.Integer, primary_key=True)
+    transaction_id = db.Column(
+        db.Integer,
+        db.ForeignKey("transactions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id = db.Column(
+        db.Integer,
+        db.ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status = db.Column(db.String(16), nullable=False, default="open")  # open/executed/cancelled
+
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    executed_at = db.Column(db.DateTime, nullable=True)
+    executed_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    transaction = db.relationship("Transaction")
+    project = db.relationship("Project")
+    approvals = db.relationship("TransactionCreateApproval", back_populates="request")
+
+
+class TransactionCreateApproval(db.Model):
+    __tablename__ = "transaction_create_approvals"
+
+    request_id = db.Column(
+        db.Integer,
+        db.ForeignKey("transaction_create_requests.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    approved_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    request = db.relationship("TransactionCreateRequest", back_populates="approvals")
     user = db.relationship("User")
 
 
