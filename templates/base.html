@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{% block title %}星瞳项目账本{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/lux/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+      :root {
+        --brand-primary: #1a3a5c;
+        --brand-accent: #e8a838;
+        --brand-light: #f8f9fc;
+        --card-radius: 12px;
+        --transition-speed: 0.2s;
+      }
+      body { background: var(--brand-light); font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+      .container-narrow { max-width: 1140px; }
+
+      /* ===== Navbar ===== */
+      .navbar.bg-primary { background: linear-gradient(135deg, var(--brand-primary) 0%, #2d5a87 100%) !important; }
+      .navbar-brand { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.5px; }
+      .navbar .nav-link { position: relative; padding: 0.5rem 1rem !important; transition: var(--transition-speed); }
+      .navbar .nav-link::after {
+        content: ''; position: absolute; bottom: 2px; left: 1rem; right: 1rem;
+        height: 2px; background: var(--brand-accent); transform: scaleX(0); transition: transform var(--transition-speed);
+      }
+      .navbar .nav-link.active::after, .navbar .nav-link:hover::after { transform: scaleX(1); }
+      .company-name {
+        color: var(--brand-accent); font-weight: 700; font-size: 1.05rem;
+        letter-spacing: 2px; text-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        border-right: 1px solid rgba(255,255,255,0.2); padding-right: 1rem; margin-right: 0.5rem;
+      }
+
+      /* ===== Cards ===== */
+      .card {
+        border: none; border-radius: var(--card-radius);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.06); transition: box-shadow var(--transition-speed), transform var(--transition-speed);
+      }
+      .card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.1); }
+      .card-header {
+        border-radius: var(--card-radius) var(--card-radius) 0 0 !important;
+        background: var(--brand-light); border-bottom: 1px solid rgba(0,0,0,0.05);
+        font-weight: 600;
+      }
+
+      /* ===== Dashboard Stats Cards ===== */
+      .stat-card { border-radius: var(--card-radius); overflow: hidden; position: relative; }
+      .stat-card .stat-icon {
+        position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+        font-size: 2.4rem; opacity: 0.15;
+      }
+      .stat-card-income { background: linear-gradient(135deg, #e8f5e9, #c8e6c9); color: #2e7d32; }
+      .stat-card-expense { background: linear-gradient(135deg, #fbe9e7, #ffccbc); color: #c62828; }
+      .stat-card-net { background: linear-gradient(135deg, #e3f2fd, #bbdefb); color: #1565c0; }
+      .stat-card-projects { background: linear-gradient(135deg, #f3e5f5, #e1bee7); color: #6a1b9a; }
+
+      /* ===== Tables ===== */
+      .table { margin-bottom: 0; }
+      .table thead th {
+        border-bottom: 2px solid var(--brand-primary); color: var(--brand-primary);
+        font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
+        padding: 0.75rem 0.5rem;
+      }
+      .table tbody tr { transition: background var(--transition-speed); }
+      .table tbody tr:hover { background: rgba(26,58,92,0.03); }
+      .table td { padding: 0.65rem 0.5rem; vertical-align: middle; }
+      .table-striped > tbody > tr:nth-of-type(odd) { background: rgba(0,0,0,0.01); }
+
+      /* ===== Buttons ===== */
+      .btn { border-radius: 8px; font-weight: 500; transition: var(--transition-speed); }
+      .btn-sm { border-radius: 6px; }
+      .btn-outline-secondary { border-color: #dee2e6; }
+      .btn-success { background: #2e7d32; border-color: #2e7d32; }
+      .btn-success:hover { background: #1b5e20; border-color: #1b5e20; }
+
+      /* ===== Progress Bars ===== */
+      .progress { border-radius: 10px; background: #e9ecef; }
+
+      /* ===== Badges ===== */
+      .badge { font-weight: 500; padding: 0.35em 0.65em; }
+
+      /* ===== Alerts ===== */
+      .alert { border-radius: 10px; border: none; }
+
+      /* ===== Forms ===== */
+      .form-control, .form-select { border-radius: 8px; border-color: #dee2e6; }
+      .form-control:focus, .form-select:focus { box-shadow: 0 0 0 3px rgba(26,58,92,0.1); border-color: var(--brand-primary); }
+
+      /* ===== Dropdown ===== */
+      .dropdown-menu { border: none; border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); }
+
+      /* ===== Misc ===== */
+      .page-link { border-radius: 6px !important; margin: 0 2px; }
+      .modal-content { border: none; border-radius: var(--card-radius); }
+      .modal-header { border-radius: var(--card-radius) var(--card-radius) 0 0; }
+      hr { opacity: 0.15; }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
+      <div class="container container-narrow">
+        <a class="navbar-brand" href="{{ url_for('main.dashboard') }}">🏠 首页</a>
+        <div class="collapse navbar-collapse">
+          <ul class="navbar-nav me-auto">
+            <li class="nav-item"><a class="nav-link {% if request.endpoint in ['main.transactions_list','main.transactions_new'] %}active{% endif %}" href="{{ url_for('main.transactions_list') }}">流水</a></li>
+            <li class="nav-item"><a class="nav-link {% if request.endpoint=='main.reports' %}active{% endif %}" href="{{ url_for('main.reports') }}">报表</a></li>
+            {% if is_admin %}
+              <li class="nav-item"><a class="nav-link {% if request.endpoint in ['main.users_list','main.users_new','main.users_edit'] %}active{% endif %}" href="{{ url_for('main.users_list') }}">用户</a></li>
+            {% endif %}
+          </ul>
+          <div class="d-flex align-items-center gap-3">
+            <span class="company-name">成都星瞳科技有限责任公司</span>
+            <span class="text-light small"><i class="bi bi-person-circle me-1"></i>{{ current_user.username }}</span>
+            <div class="dropdown">
+              <button class="btn btn-outline-light btn-sm dropdown-toggle px-3" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-gear me-1"></i>账户
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('main.change_password') }}"><i class="bi bi-key me-2"></i>修改密码</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <form class="px-3 py-1" method="post" action="{{ url_for('main.logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger w-100" type="submit"><i class="bi bi-box-arrow-right me-1"></i>退出登录</button>
+                  </form>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container container-narrow py-4">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm" role="alert">
+              <i class="bi bi-{% if category == 'success' %}check-circle{% elif category == 'danger' %}exclamation-triangle{% elif category == 'warning' %}exclamation-circle{% else %}info-circle{% endif %} me-2"></i>
+              {{ message }}
+              <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

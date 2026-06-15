@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h4 mb-0">仪表盘</h1>
+      <div class="text-muted small">项目总览、入账/出账、回款进度与分红管理</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.projects_new') }}">新建项目</a>
+      <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new') }}">新增流水</a>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card stat-card stat-card-income">
+        <div class="card-body">
+          <i class="bi bi-graph-up-arrow stat-icon"></i>
+          <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing: 0.5px;">入账（已到账）</div>
+          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format(income_cents/100) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card stat-card-expense">
+        <div class="card-body">
+          <i class="bi bi-graph-down-arrow stat-icon"></i>
+          <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing: 0.5px;">出账（已付款）</div>
+          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format(expense_cents/100) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card stat-card-net">
+        <div class="card-body">
+          <i class="bi bi-wallet2 stat-icon"></i>
+          <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing: 0.5px;">净额</div>
+          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format(net_cents/100) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card stat-card-projects">
+        <div class="card-body">
+          <i class="bi bi-folder2-open stat-icon"></i>
+          <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing: 0.5px;">项目</div>
+          <div class="fs-3 fw-bold">
+            <span class="text-success">{{ active_count }}</span> 进行中
+            {% if ended_count > 0 %}
+              · <span class="text-danger">{{ ended_count }}</span> 已终止
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div class="fw-semibold">入账 vs 出账</div>
+            <a class="small" href="{{ url_for('main.reports') }}">查看报表</a>
+          </div>
+          <canvas id="chart-summary" height="120"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-body">
+          <div class="fw-semibold">进行中项目未回款（Top10，按我方净额）</div>
+          <canvas id="chart-projects" height="120"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="h6" style="color: var(--brand-primary);"><i class="bi bi-activity me-2"></i>进行中项目</h2>
+  <div class="text-muted small mb-2">
+    合同金额统一为客户合同总价；「中介先扣」项目的收入流水通常记我方净额（中介已扣），「我方另付」项目收入流水通常记客户全额。未收净额均为我方口径。
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>项目</th>
+          <th class="text-end">我方应收(合同)</th>
+          <th class="text-end">流水累计入账</th>
+          <th class="text-end">我方已收净</th>
+          <th class="text-end">我方未收净</th>
+          <th style="min-width: 120px;">进度</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in project_rows %}
+          {% set pct = (row.received_net_cents / row.expected_net_cents * 100)|int if row.expected_net_cents > 0 else 0 %}
+          {% set pct = [pct, 100]|min %}
+          <tr>
+            <td>{{ row.project.name }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(row.expected_net_cents/100) }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(row.received_cents/100) }}</td>
+            <td class="text-end">¥ {{ '%.2f'|format(row.received_net_cents/100) }}</td>
+            <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(row.remaining_net_cents/100) }}</td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                <div class="progress flex-grow-1" style="height: 6px;">
+                  <div class="progress-bar {% if pct >= 100 %}bg-success{% elif pct >= 50 %}bg-primary{% else %}bg-warning{% endif %}" role="progressbar" style="width: {{ pct }}%;"></div>
+                </div>
+                <span class="small text-muted text-nowrap">{{ pct }}%</span>
+              </div>
+            </td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=row.project.id) }}">查看</a>
+              {% if is_admin and row.project.status != 'ended' %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=row.project.id) }}">编辑</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="text-muted">暂无进行中的项目</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if list_pages > 1 %}
+    <nav class="mt-2 mb-4" aria-label="项目列表分页">
+      <ul class="pagination pagination-sm justify-content-center mb-0">
+        {% if list_has_prev %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.dashboard', page=list_prev_page) }}">上一页</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">上一页</span></li>
+        {% endif %}
+        <li class="page-item disabled"><span class="page-link">{{ list_page }} / {{ list_pages }}（共 {{ list_total }} 条）</span></li>
+        {% if list_has_next %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.dashboard', page=list_next_page) }}">下一页</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">下一页</span></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+
+  {% if ended_rows %}
+    <div class="card mb-4">
+      <div class="card-header py-2" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#endedProjectsCollapse" aria-expanded="false" aria-controls="endedProjectsCollapse">
+        <div class="d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-archive me-2"></i><span class="fw-semibold">已终止项目（{{ ended_rows|length }}）</span></span>
+          <span class="text-muted small">点击展开 ▼</span>
+        </div>
+      </div>
+      <div id="endedProjectsCollapse" class="collapse">
+        <div class="card-body">
+          <div class="row g-2 mb-3">
+            <div class="col-md-2">
+              <div class="border rounded p-2 text-center">
+                <div class="text-muted small">总收入</div>
+                <div class="fw-semibold">¥ {{ '%.2f'|format(ended_total_income/100) }}</div>
+              </div>
+            </div>
+            <div class="col-md-2">
+              <div class="border rounded p-2 text-center">
+                <div class="text-muted small">总支出</div>
+                <div class="fw-semibold">¥ {{ '%.2f'|format(ended_total_expense/100) }}</div>
+              </div>
+            </div>
+            <div class="col-md-2">
+              <div class="border rounded p-2 text-center">
+                <div class="text-muted small">总利润</div>
+                <div class="fw-semibold {% if ended_total_profit >= 0 %}text-success{% else %}text-danger{% endif %}">¥ {{ '%.2f'|format(ended_total_profit/100) }}</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="border rounded p-2 text-center">
+                <div class="text-muted small">已分红</div>
+                <div class="fw-semibold">¥ {{ '%.2f'|format(ended_total_div_paid/100) }}</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="border rounded p-2 text-center">
+                <div class="text-muted small">未分红</div>
+                <div class="fw-semibold text-{% if ended_total_div_remaining > 0 %}danger{% else %}success{% endif %}">¥ {{ '%.2f'|format(ended_total_div_remaining/100) }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>项目</th>
+                  <th class="text-end">我方已收净</th>
+                  <th class="text-end">已分红</th>
+                  <th class="text-end">未分红</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in ended_rows %}
+                  {% set has_remaining = row.dividend_remaining > 0 %}
+                  <tr class="{% if has_remaining %}table-warning{% endif %}">
+                    <td>
+                      {{ row.project.name }}
+                      {% if has_remaining %}
+                        <span class="badge text-bg-warning ms-1">未分红</span>
+                      {% endif %}
+                    </td>
+                    <td class="text-end">¥ {{ '%.2f'|format(row.received_net_cents/100) }}</td>
+                    <td class="text-end">¥ {{ '%.2f'|format(row.dividend_paid/100) }}</td>
+                    <td class="text-end fw-bold {% if has_remaining %}text-danger{% else %}text-success{% endif %}">
+                      ¥ {{ '%.2f'|format(row.dividend_remaining/100) }}
+                    </td>
+                    <td class="text-end">
+                      <a class="btn btn-sm {% if has_remaining and is_admin %}btn-success{% else %}btn-outline-secondary{% endif %}" href="{% if has_remaining and is_admin %}{{ url_for('main.project_dividend_page', project_id=row.project.id) }}{% else %}{{ url_for('main.project_detail', project_id=row.project.id) }}{% endif %}">
+                        {% if has_remaining and is_admin %}分红{% else %}查看{% endif %}
+                      </a>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const income = {{ (income_cents/100)|round(2) }};
+  const expense = {{ (expense_cents/100)|round(2) }};
+  new Chart(document.getElementById('chart-summary'), {
+    type: 'bar',
+    data: {
+      labels: ['入账', '出账'],
+      datasets: [{
+        label: '流水金额（元，全额）',
+        data: [income, expense],
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+
+  const proj = {{ chart_projects_json|safe }};
+  new Chart(document.getElementById('chart-projects'), {
+    type: 'bar',
+    data: {
+      labels: proj.labels,
+      datasets: [{
+        label: '我方未收净额（元）',
+        data: proj.remaining,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      indexAxis: 'y',
+      scales: { x: { beginAtZero: true } }
+    }
+  });
+</script>
+{% endblock %}

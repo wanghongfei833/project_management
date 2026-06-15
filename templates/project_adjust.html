@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}追加应收 - 项目账本{% endblock %}
+{% block content %}
+  <h1 class="h4 mb-3">追加应收</h1>
+  <div class="text-muted mb-3">项目：{{ project.name }}</div>
+
+  <form method="post" class="card">
+    <div class="card-body">
+      {{ form.hidden_tag() }}
+      <div class="mb-3">
+        <label class="form-label">追加应收（元）</label>
+        {{ form.amount_yuan(class="form-control") }}
+      </div>
+      <div class="mb-3">
+        <label class="form-label">备注</label>
+        {{ form.note(class="form-control", rows="3") }}
+      </div>
+      <button class="btn btn-primary" type="submit">保存</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=project.id) }}">返回</a>
+    </div>
+  </form>
+{% endblock %}
+

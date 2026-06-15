@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}新增流水 - 项目账本{% endblock %}
+{% block content %}
+  <h1 class="h4 mb-3">新增流水</h1>
+
+  <form method="post" enctype="multipart/form-data" class="card">
+    <div class="card-body">
+      {{ form.hidden_tag() }}
+      <div class="row g-3">
+        <div class="col-md-3">
+          <label class="form-label">类型</label>
+          {{ form.type(class="form-select") }}
+        </div>
+        <div class="col-md-5">
+          <label class="form-label">所属项目（必选）</label>
+          {{ form.project_id(class="form-select") }}
+          <div class="form-text">每条流水必须归属一个项目。</div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">金额（元）</label>
+          {{ form.amount_yuan(class="form-control") }}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">发生日期</label>
+          {{ form.occur_date(class="form-control") }}
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <div class="form-check">
+            {{ form.settled(class="form-check-input") }}
+            <label class="form-check-label">已到账/已付款</label>
+          </div>
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">对方</label>
+          {{ form.counterparty(class="form-control") }}
+        </div>
+        <div class="col-12">
+          <label class="form-label">备注</label>
+          {{ form.note(class="form-control", rows="3") }}
+        </div>
+        <div class="col-12">
+          <label class="form-label">上传凭证（可多选）</label>
+          <input class="form-control" type="file" name="attachments" multiple>
+          <div class="form-text">文件保存到 <code>uploads/projects/&lt;项目ID&gt;/</code> 下（按项目分目录）；支持中文等文件名展示，磁盘上使用安全文件名。</div>
+        </div>
+      </div>
+
+      <div class="mt-3 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">保存</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('main.transactions_list') }}">返回</a>
+      </div>
+    </div>
+  </form>
+{% endblock %}
+

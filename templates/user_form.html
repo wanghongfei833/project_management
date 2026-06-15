@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}新增用户 - 项目账本{% endblock %}
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-body">
+          <h1 class="h4 mb-3">新增用户</h1>
+
+          <form method="post">
+            {{ form.hidden_tag() }}
+
+            <div class="mb-3">
+              <label class="form-label">用户名</label>
+              {{ form.username(class="form-control") }}
+            </div>
+
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">角色</label>
+                {{ form.role(class="form-select") }}
+              </div>
+              <div class="col-md-6 d-flex align-items-end">
+                <div class="form-check">
+                  {{ form.is_active(class="form-check-input") }}
+                  <label class="form-check-label">启用账号</label>
+                </div>
+              </div>
+            </div>
+
+            <div class="mb-3 mt-3">
+              <label class="form-label">初始密码（可留空）</label>
+              {{ form.password(class="form-control") }}
+              <div class="form-text">留空则默认密码为：<code>123456!</code></div>
+            </div>
+
+            <button class="btn btn-primary" type="submit">创建</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('main.users_list') }}">返回</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

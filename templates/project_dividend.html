@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}分红 - {{ project.name }}{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <h1 class="h4 mb-1">分红 — {{ project.name }}</h1>
+      <div class="text-muted small">项目已终止，可基于最终利润进行分红</div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=project.id) }}">返回项目</a>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card">
+        <div class="card-body text-center">
+          <div class="text-muted small">我方已收净额</div>
+          <div class="fs-5 fw-semibold">¥ {{ '%.2f'|format(received_net_cents/100) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card">
+        <div class="card-body text-center">
+          <div class="text-muted small">实际支出（不含分红）</div>
+          <div class="fs-5 fw-semibold">¥ {{ '%.2f'|format(paid_cents_excl_div/100) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card">
+        <div class="card-body text-center">
+          <div class="text-muted small">可分红总额</div>
+          <div class="fs-5 fw-semibold">¥ {{ '%.2f'|format(dividend_base_cents/100) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card">
+        <div class="card-body text-center">
+          <div class="text-muted small">剩余可分红</div>
+          <div class="fs-5 fw-bold text-{% if dividend_remaining_cents > 0 %}danger{% else %}success{% endif %}">
+            ¥ {{ '%.2f'|format(dividend_remaining_cents/100) }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if dividend_remaining_cents <= 0 %}
+    <div class="alert alert-success">该项目已全部分红完毕，无剩余可分红金额。</div>
+  {% else %}
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div class="fw-semibold">分红登记表</div>
+          <div>
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="equalSplit()">⚡ 均分</button>
+            <span class="text-muted small ms-2">剩余可分红：<strong id="remaining-display">¥ {{ '%.2f'|format(dividend_remaining_cents/100) }}</strong></span>
+          </div>
+        </div>
+        <form id="dividend-form" method="post" action="{{ url_for('main.project_dividend_post', project_id=project.id) }}" onsubmit="return validateDividend();">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle" id="dividend-table">
+              <thead>
+                <tr>
+                  <th style="width:40%;">姓名</th>
+                  <th style="width:30%;">分红金额（元）</th>
+                  <th style="width:30%;">剩余金额（元）</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for u in members %}
+                  <tr>
+                    <td>{{ u.username }}</td>
+                    <td>
+                      <input type="number" name="amount_{{ u.id }}" id="amount-{{ u.id }}"
+                             class="form-control form-control-sm dividend-amount"
+                             step="0.01" min="0" placeholder="0.00"
+                             oninput="updateRemaining()"
+                             style="max-width: 180px;">
+                    </td>
+                    <td class="remaining-cell text-muted">—</td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="3" class="text-muted">无非管理员项目成员</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="d-flex gap-2 mt-2">
+            <button type="submit" class="btn btn-success">确认分红</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=project.id) }}">取消</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="card mt-4">
+    <div class="card-header py-2">
+      <span class="fw-semibold">项目成员（可分红对象，{{ members|length }} 人）</span>
+    </div>
+    <div class="card-body">
+      <ul class="list-unstyled mb-0">
+        {% for u in members %}
+          <li>{{ loop.index }}. {{ u.username }}</li>
+        {% else %}
+          <li class="text-muted">无非管理员成员</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const totalRemaining = {{ dividend_remaining_cents }};
+  const memberCount = {{ members|length }};
+
+  function getAmounts() {
+    const inputs = document.querySelectorAll('.dividend-amount');
+    const amounts = [];
+    inputs.forEach(inp => {
+      const val = parseFloat(inp.value) || 0;
+      amounts.push(Math.round(val * 100)); // convert to cents
+    });
+    return amounts;
+  }
+
+  function updateRemaining() {
+    const amounts = getAmounts();
+    const sum = amounts.reduce((a, b) => a + b, 0);
+    let remaining = totalRemaining - sum;
+    const cells = document.querySelectorAll('.remaining-cell');
+    for (let i = 0; i < cells.length; i++) {
+      const rowSum = amounts.slice(0, i + 1).reduce((a, b) => a + b, 0);
+      const rowRemaining = totalRemaining - rowSum;
+      cells[i].textContent = '¥ ' + (rowRemaining / 100).toFixed(2);
+      cells[i].className = 'remaining-cell' + (rowRemaining < 0 ? ' text-danger' : ' text-muted');
+    }
+    document.getElementById('remaining-display').textContent = '¥ ' + (remaining / 100).toFixed(2);
+  }
+
+  function equalSplit() {
+    if (memberCount === 0) return;
+    // 均分到分，向下取整，余数给最后一人
+    const shareEach = Math.floor(totalRemaining / memberCount);
+    const remainder = totalRemaining - shareEach * memberCount;
+    const inputs = document.querySelectorAll('.dividend-amount');
+    inputs.forEach((inp, i) => {
+      let amt = shareEach;
+      if (i === memberCount - 1) amt += remainder;
+      inp.value = (amt / 100).toFixed(2);
+    });
+    updateRemaining();
+  }
+
+  function validateDividend() {
+    const amounts = getAmounts();
+    const sum = amounts.reduce((a, b) => a + b, 0);
+    if (sum <= 0) {
+      alert('请填写分红金额');
+      return false;
+    }
+    if (sum > totalRemaining) {
+      alert('分红总额超出剩余可分红额度 ¥' + (totalRemaining / 100).toFixed(2));
+      return false;
+    }
+    const hasAny = amounts.some(a => a > 0);
+    if (!hasAny) {
+      alert('请至少填写一个成员的分红金额');
+      return false;
+    }
+    return confirm('确认划出分红 ¥' + (sum / 100).toFixed(2) + '？将创建一笔支出流水。');
+  }
+</script>
+{% endblock %}
