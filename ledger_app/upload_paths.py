@@ -45,9 +45,8 @@ def attachment_disk_suffix(display_name: str) -> str:
     suf = Path(display_name).suffix.lower()
     if suf in ALLOWED_SUFFIXES:
         return suf
-    if re.fullmatch(r"\.[a-z0-9]{1,10}", suf):
-        return suf
-    return ".bin"
+    # 不在白名单内的后缀一律拒绝
+    raise ValueError(f"不允许上传 {suf} 格式的文件")
 
 
 def transaction_attachment_relpath(

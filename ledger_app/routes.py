@@ -246,6 +246,10 @@ def change_password():
             flash("当前密码不正确", "danger")
             return render_template("change_password.html", form=form, is_admin=is_admin())
 
+        if form.current_password.data == form.new_password.data:
+            flash("新密码不能与当前密码相同", "warning")
+            return render_template("change_password.html", form=form, is_admin=is_admin())
+
         current_user.set_password(form.new_password.data)
         db.session.commit()
         flash("密码已更新", "success")
@@ -376,7 +380,7 @@ def login():
             flash("用户名或密码错误", "danger")
             return render_template("login.html", form=form)
         if not user.is_active:
-            flash("账号已被禁用，请联系管理员启用后再登录。", "danger")
+            flash("用户名或密码错误", "danger")
             return render_template("login.html", form=form)
         if not user.check_password(form.password.data):
             flash("用户名或密码错误", "danger")
@@ -1061,6 +1065,14 @@ def _save_transaction_attachments(tx: Transaction) -> int:
             continue
         display_name = attachment_display_name(f.filename)
 
+        # 校验文件后缀
+        try:
+            from .upload_paths import attachment_disk_suffix
+            attachment_disk_suffix(display_name)
+        except ValueError as e:
+            flash(str(e), "warning")
+            continue
+
         f.stream.seek(0)
         digest = sha256_file(f.stream)
         f.stream.seek(0)
@@ -1148,6 +1160,14 @@ def _save_project_update_attachments(update: ProjectUpdate) -> int:
         if not f or not getattr(f, "filename", ""):
             continue
         display_name = attachment_display_name(f.filename)
+
+        # 校验文件后缀
+        try:
+            from .upload_paths import attachment_disk_suffix
+            attachment_disk_suffix(display_name)
+        except ValueError as e:
+            flash(str(e), "warning")
+            continue
 
         f.stream.seek(0)
         digest = sha256_file(f.stream)
@@ -1702,7 +1722,6 @@ def project_dividend_page(project_id: int):
         return redirect(url_for("main.project_detail", project_id=p.id))
 
     # 计算分红数据
-    from .models import TransactionType
     received_cents = int(
         db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
         .filter(Transaction.project_id == p.id, Transaction.type == TransactionType.INCOME.value,

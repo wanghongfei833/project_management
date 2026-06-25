@@ -54,3 +54,7 @@ admin_账号密码.txt
 # 打包备份
 *.zip
 *.tar.gz
+
+# ===== Tool / IDE config =====
+.reasonix/
+.codegraph/
