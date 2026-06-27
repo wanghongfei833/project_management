@@ -94,7 +94,8 @@ def create_app():
         db.create_all()
         # Ensure existing SQLite DB gets new columns/tables
         ensure_sqlite_schema()
-        ensure_seed_data()
+        if not app.config.get("TESTING"):
+            ensure_seed_data()
 
     return app
 

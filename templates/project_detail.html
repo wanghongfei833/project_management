@@ -4,7 +4,9 @@
   <div class="d-flex justify-content-between align-items-start mb-3">
     <div>
       <h1 class="h4 mb-1">{{ project.name }}</h1>
-      <div class="text-muted small">状态：{% if project.status == 'ended' %}<span class="text-danger fw-bold">已终止</span>{% elif project.status == 'open' %}进行中{% else %}已结束{% endif %}</div>
+      <div class="text-muted small">状态：{% if project.status == 'ended' %}<span class="text-danger fw-bold">已终止</span>{% elif project.status == 'open' %}进行中{% else %}已结束{% endif %}
+        {% if project.sub_projects %}<span class="badge text-bg-secondary ms-1" style="font-size:.65rem;">{{ all_sub_projects|length + project.sub_projects|length }} 个子项目</span>{% endif %}
+      </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
       {% if is_admin and project.status != 'ended' %}
@@ -133,6 +135,30 @@
       </div>
     </div>
   </div>
+
+
+  {% if project.sub_projects %}
+    <div class="card mb-4">
+      <div class="card-body">
+        <div class="fw-semibold mb-2">子项目（{{ all_sub_projects|length + project.sub_projects|length }} 个）</div>
+        <div class="d-flex flex-wrap gap-2">
+          {% for sub in all_sub_projects %}
+            <a href="{{ url_for('main.project_detail', project_id=sub.id) }}" class="btn btn-sm btn-outline-secondary">
+              {{ sub.name }}
+              {% if not sub.can_dividend %}<span class="badge text-bg-warning ms-1">不可分红</span>{% endif %}
+            </a>
+          {% else %}
+            {% for sub in project.sub_projects %}
+              <a href="{{ url_for('main.project_detail', project_id=sub.id) }}" class="btn btn-sm btn-outline-secondary">
+                {{ sub.name }}
+                {% if not sub.can_dividend %}<span class="badge text-bg-warning ms-1">不可分红</span>{% endif %}
+              </a>
+            {% endfor %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
 
   <div class="card mb-4">
     <div class="card-body">
@@ -331,6 +357,7 @@
 
       <hr class="my-3">
 
+      {% if project.can_dividend %}
       <div class="fw-semibold mb-2">可分红（按当前盈余口径）</div>
       <div class="row g-3 align-items-stretch">
         <div class="col-md-4">
@@ -402,6 +429,8 @@
           </div>
         </div>
       {% endif %}
+
+      {% endif %} {# / can_dividend #}
 
       <details class="mt-4">
         <summary class="fw-semibold text-primary" style="cursor: pointer;">展开：回款与合同明细、中介拆分</summary>

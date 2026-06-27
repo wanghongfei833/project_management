@@ -71,6 +71,12 @@ class ProjectForm(FlaskForm):
         "状态", choices=[("open", "进行中"), ("closed", "已结束")], validators=[DataRequired()]
     )
     note = TextAreaField("备注", validators=[Optional(), Length(max=2000)])
+    parent_project_id = SelectField("隶属于（父项目）", coerce=int, validators=[Optional()])
+    can_dividend = SelectField(
+        "允许分红",
+        choices=[(1, "是——独立分红，利润归该项目"), (2, "否——利润自动回流到父项目")],
+        coerce=int, validators=[DataRequired()],
+    )
     member_user_ids = SelectMultipleField("项目成员", coerce=int, validators=[Optional()])
 
 
@@ -100,6 +106,28 @@ class ProjectDividendForm(FlaskForm):
     note = TextAreaField("备注", validators=[Optional(), Length(max=2000)])
 
 
+# 对方选项常量
+CP_INCOME_OWNER = "业主[甲方]"
+CP_INCOME_OTHER = "其他（收入）"
+CP_EXPENSE_MEMBER = "项目人员"
+CP_EXPENSE_REIMBURSE = "报销款"
+CP_EXPENSE_BROKER = "中介费"
+CP_EXPENSE_SUPPLIER = "供应商"
+CP_EXPENSE_DIVIDEND = "分红"
+
+INCOME_CP_CHOICES = [
+    (CP_INCOME_OWNER, "业主[甲方]"),
+    (CP_INCOME_OTHER, "其他（备注必填）"),
+]
+
+EXPENSE_CP_CHOICES = [
+    (CP_EXPENSE_MEMBER, "项目人员（选人）"),
+    (CP_EXPENSE_REIMBURSE, "报销款"),
+    (CP_EXPENSE_BROKER, "中介费"),
+    (CP_EXPENSE_SUPPLIER, "供应商"),
+]
+
+
 class TransactionForm(FlaskForm):
     type = SelectField(
         "类型", choices=[("income", "收入"), ("expense", "支出")], validators=[DataRequired()]
@@ -117,7 +145,8 @@ class TransactionForm(FlaskForm):
     )
     occur_date = DateField("发生日期", default=date.today, validators=[DataRequired()])
     settled = BooleanField("已到账/已付款", default=True)
-    counterparty = StringField("对方", validators=[Optional(), Length(max=256)])
+    counterparty = SelectField("对方", coerce=str, validators=[DataRequired()], choices=[], validate_choice=False)
+    recipient_user_id = SelectField("项目人员", coerce=int, validators=[Optional()], choices=[], validate_choice=False)
     note = TextAreaField("备注", validators=[Optional(), Length(max=2000)])
 
 
@@ -130,7 +159,8 @@ class TransactionEditForm(FlaskForm):
     )
     occur_date = DateField("发生日期", default=date.today, validators=[DataRequired()])
     settled = BooleanField("已到账/已付款", default=True)
-    counterparty = StringField("对方", validators=[Optional(), Length(max=256)])
+    counterparty = SelectField("对方", coerce=str, validators=[DataRequired()], choices=[], validate_choice=False)
+    recipient_user_id = SelectField("项目人员", coerce=int, validators=[Optional()], choices=[], validate_choice=False)
     note = TextAreaField("备注", validators=[Optional(), Length(max=2000)])
 
 

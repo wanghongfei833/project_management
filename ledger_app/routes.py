@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 import json
@@ -33,6 +33,15 @@ from .project_finance import (
 )
 from .forms import (
     ChangePasswordForm,
+    CP_EXPENSE_BROKER,
+    CP_EXPENSE_DIVIDEND,
+    CP_EXPENSE_MEMBER,
+    CP_EXPENSE_REIMBURSE,
+    CP_EXPENSE_SUPPLIER,
+    CP_INCOME_OTHER,
+    CP_INCOME_OWNER,
+    EXPENSE_CP_CHOICES,
+    INCOME_CP_CHOICES,
     LoginForm,
     ProjectAdjustmentForm,
     ProjectDividendForm,
@@ -713,11 +722,36 @@ def projects_new():
     users = User.query.filter_by(is_active=True).order_by(User.username.asc()).all()
     form.member_user_ids.choices = [(u.id, u.username) for u in users]
     form.leader_user_id.choices = [(u.id, u.username) for u in users]
+    # 父项目选择：只显示没有父项目的项目（独立项目或已是父项目）
+    parent_candidates = Project.query.filter(Project.status != "ended").order_by(Project.name.asc()).all()
+    form.parent_project_id.choices = [(0, "（无——独立项目）")] + [(p.id, p.name) for p in parent_candidates]
+    # 构建父项目成员映射（用于前端JS分行显示）
+    parent_members_map = {
+        int(p.id): [int(pm.user_id) for pm in ProjectMember.query.filter_by(project_id=p.id).all()]
+        for p in parent_candidates
+    }
     admin_user_ids = _admin_user_ids()
+    # 计算父项目成员 ID（用于模板显示分两行）
+    def _get_parent_member_ids():
+        pid = form.parent_project_id.data
+        if pid and pid != 0:
+            pp = db.session.get(Project, pid)
+            if pp:
+                return {int(pm.user_id) for pm in ProjectMember.query.filter_by(project_id=pp.id).all()}
+        return set()
+    parent_member_ids = _get_parent_member_ids()
+
     if form.validate_on_submit():
         if form.planned_end_date.data < form.planned_start_date.data:
             flash("计划结束日期不能早于开始日期", "warning")
-            return render_template("project_form.html", form=form, is_admin=is_admin())
+            return render_template("project_form.html", form=form, is_admin=is_admin(), parent_candidates=parent_candidates, admin_user_ids=admin_user_ids, parent_member_ids=parent_member_ids)
+
+        # 校验项目名称唯一性
+        name = form.name.data.strip()
+        existing = Project.query.filter_by(name=name).first()
+        if existing:
+            flash(f"项目名称「{name}」已存在，请换一个名称", "warning")
+            return render_template("project_form.html", form=form, is_admin=is_admin(), parent_candidates=parent_candidates, admin_user_ids=admin_user_ids, parent_member_ids=parent_member_ids)
 
         ratio_percent = form.referral_ratio_percent.data
         ratio = Decimal("0")
@@ -733,17 +767,21 @@ def projects_new():
             fixed_cents = 0
         if mode == BROKER_MODE_FIXED and direction == BROKER_DIR_WE_PAY and fixed_cents <= 0:
             flash("在「固定金额」且「我方另付介绍费」模式下，请填写大于 0 的中介固定费用。", "warning")
-            return render_template("project_form.html", form=form, is_admin=is_admin())
+            return render_template("project_form.html", form=form, is_admin=is_admin(), parent_candidates=parent_candidates, admin_user_ids=admin_user_ids, parent_member_ids=parent_member_ids)
         if (
             mode == BROKER_MODE_PERCENT
             and direction == BROKER_DIR_NET_FROM_BROKER
             and ratio >= Decimal("1")
         ):
             flash("「中介从客户款中扣除」且按比例时，中介比例须小于 100%。", "warning")
-            return render_template("project_form.html", form=form, is_admin=is_admin())
+            return render_template("project_form.html", form=form, is_admin=is_admin(), parent_candidates=parent_candidates, admin_user_ids=admin_user_ids, parent_member_ids=parent_member_ids)
 
+        parent_id = form.parent_project_id.data
+        if parent_id == 0:
+            parent_id = None
+        can_div = form.can_dividend.data == 1 if parent_id else True
         p = Project(
-            name=form.name.data.strip(),
+            name=name,
             leader_user_id=int(form.leader_user_id.data),
             planned_start_date=form.planned_start_date.data,
             planned_end_date=form.planned_end_date.data,
@@ -754,6 +792,8 @@ def projects_new():
             broker_fixed_fee_cents=int(fixed_cents),
             status=form.status.data,
             note=form.note.data or None,
+            parent_project_id=parent_id,
+            can_dividend=can_div,
         )
         db.session.add(p)
         db.session.flush()
@@ -783,13 +823,23 @@ def projects_new():
         form.planned_end_date.data = date.today()
         form.broker_fee_mode.data = BROKER_MODE_PERCENT
         form.broker_fee_direction.data = BROKER_DIR_WE_PAY
-        form.broker_fixed_fee_yuan.data = Decimal("0")
+        form.can_dividend.data = 1
+
+    parent_member_ids = set()
+    if form.parent_project_id.data and form.parent_project_id.data != 0:
+        pp = db.session.get(Project, form.parent_project_id.data)
+        if pp:
+            parent_member_ids = {int(pm.user_id) for pm in ProjectMember.query.filter_by(project_id=pp.id).all()}
 
     return render_template(
         "project_form.html",
         form=form,
         is_admin=is_admin(),
+        mode="create",
+        parent_candidates=parent_candidates,
         admin_user_ids=admin_user_ids,
+        parent_member_ids=parent_member_ids,
+        parent_members_map_json=json.dumps(parent_members_map, ensure_ascii=False),
     )
 
 
@@ -809,7 +859,28 @@ def projects_edit(project_id: int):
     users = User.query.filter_by(is_active=True).order_by(User.username.asc()).all()
     form.member_user_ids.choices = [(u.id, u.username) for u in users]
     form.leader_user_id.choices = [(u.id, u.username) for u in users]
+    # 父项目选择：当前项目及其子项目不可选
+    # 父项目候选：排除自身和所有子孙项目（防环形引用）
+    sub_ids = _collect_all_sub_project_ids(p.id)
+    sub_ids.add(p.id)
+    parent_candidates = Project.query.filter(
+        ~Project.id.in_(sub_ids), Project.status != "ended"
+    ).order_by(Project.name.asc()).all()
+    parent_members_map = {
+        int(pp.id): [int(pm.user_id) for pm in ProjectMember.query.filter_by(project_id=pp.id).all()]
+        for pp in parent_candidates
+    }
     admin_user_ids = _admin_user_ids()
+    # 计算父项目成员 ID
+    def _get_parent_member_ids():
+        pid = form.parent_project_id.data or p.parent_project_id
+        if pid and pid != 0:
+            pp = db.session.get(Project, int(pid))
+            if pp:
+                return {int(pm.user_id) for pm in ProjectMember.query.filter_by(project_id=pp.id).all()}
+        return set()
+    parent_member_ids = _get_parent_member_ids()
+
     if request.method == "GET":
         form.name.data = p.name
         form.leader_user_id.data = int(p.leader_user_id) if p.leader_user_id else current_user.id
@@ -831,6 +902,9 @@ def projects_edit(project_id: int):
             )
         form.status.data = p.status
         form.note.data = p.note or ""
+        form.parent_project_id.data = p.parent_project_id or 0
+        form.can_dividend.data = 1 if p.can_dividend else 0
+        form.parent_project_id.choices = [(0, "（无——独立项目）")] + [(pp.id, pp.name) for pp in parent_candidates]
         current_members = ProjectMember.query.filter_by(project_id=p.id).all()
         form.member_user_ids.data = [m.user_id for m in current_members]
 
@@ -847,6 +921,14 @@ def projects_edit(project_id: int):
         fixed_cents = yuan_to_cents(fixed_yuan) if fixed_yuan > 0 else 0
         if mode == BROKER_MODE_PERCENT:
             fixed_cents = 0
+
+        # 校验项目名称唯一性（排除自身）
+        name = form.name.data.strip()
+        existing = Project.query.filter(Project.name == name, Project.id != p.id).first()
+        if existing:
+            flash(f"项目名称「{name}」已存在，请换一个名称", "warning")
+            return render_template("project_form.html", form=form, is_admin=is_admin(), mode="edit", project=p,
+                                   parent_candidates=parent_candidates, admin_user_ids=admin_user_ids, parent_member_ids=parent_member_ids)
         if mode == BROKER_MODE_FIXED and direction == BROKER_DIR_WE_PAY and fixed_cents <= 0:
             flash("在「固定金额」且「我方另付介绍费」模式下，请填写大于 0 的中介固定费用。", "warning")
             return render_template(
@@ -855,6 +937,9 @@ def projects_edit(project_id: int):
                 is_admin=is_admin(),
                 mode="edit",
                 project=p,
+                parent_candidates=parent_candidates,
+                admin_user_ids=admin_user_ids,
+                parent_member_ids=parent_member_ids,
             )
         if (
             mode == BROKER_MODE_PERCENT
@@ -870,7 +955,7 @@ def projects_edit(project_id: int):
                 project=p,
             )
 
-        p.name = form.name.data.strip()
+        p.name = name
         p.leader_user_id = int(form.leader_user_id.data)
         p.expected_income_cents = yuan_to_cents(form.expected_income_yuan.data)
         p.referral_ratio = ratio
@@ -879,6 +964,9 @@ def projects_edit(project_id: int):
         p.broker_fixed_fee_cents = int(fixed_cents)
         p.status = form.status.data
         p.note = form.note.data or None
+        parent_id = form.parent_project_id.data
+        p.parent_project_id = parent_id if parent_id and parent_id != 0 else None
+        p.can_dividend = form.can_dividend.data == 1
 
         new_member_ids = set(form.member_user_ids.data or [])
         new_member_ids.update(admin_user_ids)  # admin 不可移出项目
@@ -902,13 +990,18 @@ def projects_edit(project_id: int):
         flash("项目已更新", "success")
         return redirect(url_for("main.project_detail", project_id=p.id))
 
+    parent_member_ids = _get_parent_member_ids()
+
     return render_template(
         "project_form.html",
         form=form,
         is_admin=is_admin(),
         mode="edit",
         project=p,
+        parent_candidates=parent_candidates,
         admin_user_ids=admin_user_ids,
+        parent_member_ids=parent_member_ids,
+        parent_members_map_json=json.dumps(parent_members_map, ensure_ascii=False),
     )
 
 
@@ -987,6 +1080,47 @@ def _transaction_delete_can_execute(req: TransactionDeleteRequest) -> bool:
     if _approval_user_ids_include_any_admin(approved_ids):
         return True
     return _transaction_delete_fully_approved(req)
+
+
+def _can_view_project(user_id: int, project_id: int) -> bool:
+    """用户是否能查看某个项目（穿透父项目链）。"""
+    visited = set()
+    p = db.session.get(Project, project_id)
+    while p:
+        if p.id in visited:
+            break
+        visited.add(p.id)
+        if _is_project_member(p.id, user_id):
+            return True
+        p = p.parent_project
+    return False
+
+
+def _set_counterparty_choices(form, project_id):
+    """设置对方下拉选项及项目人员列表。"""
+    from .forms import EXPENSE_CP_CHOICES, INCOME_CP_CHOICES
+    # 包含全部选项，前端 JS 按类型切换显示
+    form.counterparty.choices = INCOME_CP_CHOICES + EXPENSE_CP_CHOICES
+
+    # 项目人员下拉
+    members = []
+    if project_id:
+        members = (
+            db.session.query(User)
+            .join(ProjectMember, ProjectMember.user_id == User.id)
+            .filter(ProjectMember.project_id == int(project_id))
+            .order_by(User.username.asc())
+            .all()
+        )
+    form.recipient_user_id.choices = [(0, "（不指定）")] + [(u.id, u.username) for u in members]
+
+
+def _collect_all_sub_project_ids(project_id: int) -> set[int]:
+    """递归收集所有子孙项目的 ID。"""
+    ids = {project_id}
+    for child in Project.query.filter_by(parent_project_id=project_id).all():
+        ids |= _collect_all_sub_project_ids(int(child.id))
+    return ids
 
 
 def _open_transaction_create_request(transaction_id: int) -> TransactionCreateRequest | None:
@@ -1243,7 +1377,7 @@ def project_end_date_change(project_id: int):
         if _project_end_date_change_can_execute(req):
             p.planned_end_date = req.new_end_date
             req.status = "executed"
-            req.executed_at = datetime.utcnow()
+            req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             req.executed_by_user_id = current_user.id
             _log_project_activity(
                 int(p.id),
@@ -1296,7 +1430,7 @@ def project_end_date_change_approve(project_id: int):
     if _project_end_date_change_can_execute(req):
         p.planned_end_date = req.new_end_date
         req.status = "executed"
-        req.executed_at = datetime.utcnow()
+        req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
         _log_project_activity(
             int(p.id),
@@ -1333,7 +1467,7 @@ def project_end_date_change_execute(project_id: int):
 
     p.planned_end_date = req.new_end_date
     req.status = "executed"
-    req.executed_at = datetime.utcnow()
+    req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     req.executed_by_user_id = current_user.id
     _log_project_activity(
         int(p.id),
@@ -1436,9 +1570,9 @@ def project_end_request(project_id: int):
     # admin 发起即自动执行
     if _project_end_can_execute(req):
         p.status = "ended"
-        p.ended_at = datetime.utcnow()
+        p.ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.status = "executed"
-        req.executed_at = datetime.utcnow()
+        req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
         _log_project_activity(
             int(p.id),
@@ -1488,9 +1622,9 @@ def project_end_approve(project_id: int):
     # 自动执行：条件满足时直接冻结项目
     if _project_end_can_execute(req):
         p.status = "ended"
-        p.ended_at = datetime.utcnow()
+        p.ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.status = "executed"
-        req.executed_at = datetime.utcnow()
+        req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
         _log_project_activity(
             int(p.id),
@@ -1591,7 +1725,7 @@ def project_revive_request(project_id: int):
         p.status = "open"
         p.ended_at = None
         req.status = "executed"
-        req.executed_at = datetime.utcnow()
+        req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
         _log_project_activity(int(p.id), "project.revive_execute", "项目已复活，恢复为进行中状态")
         db.session.commit()
@@ -1631,7 +1765,7 @@ def project_revive_approve(project_id: int):
         p.status = "open"
         p.ended_at = None
         req.status = "executed"
-        req.executed_at = datetime.utcnow()
+        req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
         _log_project_activity(int(p.id), "project.revive_execute", "项目已复活，恢复为进行中状态")
         db.session.commit()
@@ -1930,6 +2064,14 @@ def projects_delete_request(project_id: int):
     if not _check_project_not_ended(p):
         return redirect(url_for("main.project_detail", project_id=project_id))
 
+    # 禁止删除有未终止子项目的父项目
+    if p.sub_projects:
+        active_subs = [sub for sub in p.sub_projects if sub.status != "ended"]
+        if active_subs:
+            names = "、".join(sub.name for sub in active_subs)
+            flash(f"该项目有未终止的子项目（{names}），请先终止所有子项目后再删除父项目", "warning")
+            return redirect(url_for("main.project_detail", project_id=project_id))
+
     existing = ProjectDeleteRequest.query.filter_by(project_id=p.id, status="open").first()
     if existing:
         flash("已存在待处理的删除申请", "warning")
@@ -2211,15 +2353,23 @@ def project_detail(project_id: int):
         flash("项目不存在", "warning")
         return redirect(url_for("main.projects_list"))
 
-    if not is_admin() and not _is_project_member(project_id, current_user.id):
+    if not is_admin() and not _can_view_project(int(current_user.id), project_id):
         flash("你不是该项目成员，无权查看。", "danger")
         return redirect(url_for("main.projects_list"))
+
+    # 父项目：聚合所有子项目数据
+    is_parent = bool(p.sub_projects)
+    if is_parent:
+        all_ids = _collect_all_sub_project_ids(int(p.id))
+        query_pid_filter = Transaction.project_id.in_(all_ids)
+    else:
+        query_pid_filter = Transaction.project_id == p.id
 
     tx_page = request.args.get("tx_page", 1, type=int) or 1
     tx_page = max(tx_page, 1)
     tx_pagination = (
         Transaction.query.options(joinedload(Transaction.attachments), joinedload(Transaction.created_by))
-        .filter_by(project_id=p.id)
+        .filter(query_pid_filter)
         .filter(Transaction.is_void.is_(False), Transaction.status == "active")
         .order_by(Transaction.occur_date.desc(), Transaction.id.desc())
         .paginate(page=tx_page, per_page=40, error_out=False)
@@ -2228,14 +2378,16 @@ def project_detail(project_id: int):
 
     pending_txs = (
         Transaction.query.options(joinedload(Transaction.attachments), joinedload(Transaction.created_by))
-        .filter_by(project_id=p.id)
+        .filter(query_pid_filter)
         .filter(Transaction.is_void.is_(False), Transaction.status == "pending")
         .order_by(Transaction.created_at.desc(), Transaction.id.desc())
         .limit(50)
         .all()
     )
     open_edit_reqs = (
-        TransactionEditRequest.query.filter_by(project_id=p.id, status="open")
+        TransactionEditRequest.query.filter_by(status="open")
+        .join(Transaction, Transaction.id == TransactionEditRequest.transaction_id)
+        .filter(query_pid_filter)
         .order_by(TransactionEditRequest.id.desc())
         .all()
     )
@@ -2246,7 +2398,9 @@ def project_detail(project_id: int):
     }
 
     open_delete_reqs = (
-        TransactionDeleteRequest.query.filter_by(project_id=p.id, status="open")
+        TransactionDeleteRequest.query.filter_by(status="open")
+        .join(Transaction, Transaction.id == TransactionDeleteRequest.transaction_id)
+        .filter(query_pid_filter)
         .order_by(TransactionDeleteRequest.id.desc())
         .all()
     )
@@ -2282,7 +2436,7 @@ def project_detail(project_id: int):
         }
     adjustments = (
         ProjectExpectedIncomeAdjustment.query.options(joinedload(ProjectExpectedIncomeAdjustment.approvals))
-        .filter_by(project_id=p.id)
+        .filter(ProjectExpectedIncomeAdjustment.project_id.in_(all_ids) if is_parent else ProjectExpectedIncomeAdjustment.project_id == p.id)
         .order_by(ProjectExpectedIncomeAdjustment.created_at.desc())
         .all()
     )
@@ -2307,7 +2461,7 @@ def project_detail(project_id: int):
     received_cents = int(
         db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
         .filter(
-            Transaction.project_id == p.id,
+            query_pid_filter,
             Transaction.type == TransactionType.INCOME.value,
             Transaction.settled.is_(True),
             Transaction.is_void.is_(False),
@@ -2319,7 +2473,7 @@ def project_detail(project_id: int):
     paid_cents_all = int(
         db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
         .filter(
-            Transaction.project_id == p.id,
+            query_pid_filter,
             Transaction.type == TransactionType.EXPENSE.value,
             Transaction.settled.is_(True),
             Transaction.is_void.is_(False),
@@ -2331,7 +2485,7 @@ def project_detail(project_id: int):
     dividend_expense_cents = int(
         db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
         .filter(
-            Transaction.project_id == p.id,
+            query_pid_filter,
             Transaction.type == TransactionType.EXPENSE.value,
             Transaction.settled.is_(True),
             Transaction.is_void.is_(False),
@@ -2342,8 +2496,17 @@ def project_detail(project_id: int):
         or 0
     )
     paid_cents = int(paid_cents_all)
-    expected_total_cents = int(project_expected_total_cents(p.id))
-    finance = build_project_finance(
+    if is_parent:
+        expected_total_cents = sum(project_expected_total_cents(sid) for sid in all_ids)
+        finance = build_project_finance(p, expected_total_cents=expected_total_cents,
+                                        received_settled_income_bank_cents=int(received_cents))
+        balance_tmp = {}
+        for sid in all_ids:
+            balance_tmp.update(running_settled_cash_balance_by_transaction_id(sid))
+        balance_after_by_tx_id = balance_tmp
+    else:
+        expected_total_cents = int(project_expected_total_cents(p.id))
+        finance = build_project_finance(
         p,
         expected_total_cents=expected_total_cents,
         received_settled_income_bank_cents=int(received_cents),
@@ -2456,11 +2619,20 @@ def project_detail(project_id: int):
         .all()
     )
 
+    # 递归收集所有子孙项目（用于父项目页展示）
+    all_sub_projects = []
+    if is_parent:
+        sub_ids = _collect_all_sub_project_ids(int(p.id))
+        sub_ids.discard(int(p.id))
+        if sub_ids:
+            all_sub_projects = Project.query.filter(Project.id.in_(sub_ids)).order_by(Project.name.asc()).all()
+
     return render_template(
         "project_detail.html",
         project=p,
         leader=leader,
         today=today,
+        all_sub_projects=all_sub_projects,
         days_total=int(days_total),
         days_elapsed=int(days_elapsed),
         days_left=int(days_left),
@@ -2584,11 +2756,10 @@ def transactions_list():
 @login_required
 def transactions_new():
     form = TransactionForm()
-    projects = _accessible_projects_query().order_by(Project.name.asc()).all()
+    projects = _accessible_projects_query().filter(Project.status != "ended").order_by(Project.name.asc()).all()
     if not projects:
         flash("暂无可登记流水的项目：请先加入某项目或由管理员创建项目。", "warning")
         return redirect(url_for("main.projects_list"))
-
     form.project_id.choices = [(p.id, p.name) for p in projects]
     allowed_ids = {int(p.id) for p in projects}
     default_pid = request.args.get("project_id", type=int)
@@ -2597,7 +2768,8 @@ def transactions_new():
             form.project_id.data = int(default_pid)
         else:
             form.project_id.data = int(projects[0].id)
-
+    sel_pid = form.project_id.data or default_pid or (projects[0].id if projects else None)
+    _set_counterparty_choices(form, sel_pid)
     if form.validate_on_submit():
         pid = int(form.project_id.data)
         if pid not in allowed_ids:
@@ -2614,58 +2786,82 @@ def transactions_new():
             return render_template("transaction_form.html", form=form, is_admin=is_admin())
         tx_status = "active" if is_admin() else "pending"
         tx = Transaction(
-            project_id=pid,
-            status=tx_status,
-            type=form.type.data,
+            project_id=pid, status=tx_status, type=form.type.data,
             amount_cents=yuan_to_cents(form.amount_yuan.data),
-            occur_date=form.occur_date.data,
-            settled=bool(form.settled.data),
+            occur_date=form.occur_date.data, settled=bool(form.settled.data),
             counterparty=form.counterparty.data or None,
-            note=form.note.data or None,
-            created_by_user_id=current_user.id,
+            recipient_user_id=form.recipient_user_id.data if form.counterparty.data == CP_EXPENSE_MEMBER else None,
+            note=form.note.data or None, created_by_user_id=current_user.id,
         )
         db.session.add(tx)
         db.session.flush()
-
         added = _save_transaction_attachments(tx)
         typ = "收入" if tx.type == TransactionType.INCOME.value else "支出"
         if tx_status == "pending":
-            creq = TransactionCreateRequest(
-                transaction_id=tx.id,
-                project_id=pid,
-                status="open",
-                created_by_user_id=current_user.id,
-            )
+            creq = TransactionCreateRequest(transaction_id=tx.id, project_id=pid, status="open", created_by_user_id=current_user.id)
             db.session.add(creq)
             db.session.flush()
-            db.session.add(
-                TransactionCreateApproval(request_id=creq.id, user_id=current_user.id)
-            )
-            _log_project_activity(
-                pid,
-                "transaction.create_request",
+            db.session.add(TransactionCreateApproval(request_id=creq.id, user_id=current_user.id))
+            _log_project_activity(pid, "transaction.create_request",
                 f"发起新增流水 #{tx.id} 审批：{typ} ¥{cents_to_yuan(int(tx.amount_cents))}，日期 {tx.occur_date}"
-                + (f"，附件 {added} 个" if added else ""),
-                detail=f"request_id={creq.id}",
-            )
+                + (f"，附件 {added} 个" if added else ""), detail=f"request_id={creq.id}")
         else:
-            _log_project_activity(
-                pid,
-                "transaction.create",
+            _log_project_activity(pid, "transaction.create",
                 f"新增流水 #{tx.id}：{typ} ¥{cents_to_yuan(int(tx.amount_cents))}，日期 {tx.occur_date}"
-                + (f"，附件 {added} 个" if added else ""),
-            )
+                + (f"，附件 {added} 个" if added else ""))
         db.session.commit()
         if tx_status == "pending":
             flash("已提交新增流水申请，待审核通过后生效。", "success")
         else:
-            if added:
-                flash(f"流水已新增，已保存 {added} 个凭证文件。", "success")
-            else:
-                flash("流水已新增", "success")
-        return redirect(url_for("main.transactions_list"))
-
+            flash(f"流水已新增{'，已保存 ' + str(added) + ' 个凭证文件' if added else ''}", "success")
+        return redirect(url_for("main.project_detail", project_id=pid))
     return render_template("transaction_form.html", form=form, is_admin=is_admin())
+
+
+@bp.get("/earnings")
+@login_required
+def personal_earnings():
+    """个人收入查看：admin 看全部，普通用户只看自己。"""
+    is_admin_user = is_admin()
+    target_user_id = request.args.get("user_id", type=int)
+    if is_admin_user and target_user_id:
+        users_q = [db.session.get(User, target_user_id)]
+        users_q = [u for u in users_q if u]
+    elif is_admin_user:
+        users_q = User.query.filter_by(is_active=True).order_by(User.username.asc()).all()
+    else:
+        users_q = User.query.filter(User.id == current_user.id).all()
+    rows = []
+    for u in users_q:
+        tx_payments = (
+            db.session.query(Transaction.project_id,
+                db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+            .filter(Transaction.recipient_user_id == u.id, Transaction.is_void.is_(False),
+                    Transaction.status == "active", Transaction.type == "expense")
+            .group_by(Transaction.project_id).all())
+        div_payments = (
+            db.session.query(ProjectDividendDistribution.project_id,
+                db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0))
+            .filter(ProjectDividendDistribution.recipient_user_id == u.id)
+            .group_by(ProjectDividendDistribution.project_id).all())
+        project_totals = {}
+        for pid, amt in tx_payments:
+            project_totals[int(pid)] = {"payment": int(amt), "dividend": 0}
+        for pid, amt in div_payments:
+            p_int = int(pid)
+            if p_int in project_totals:
+                project_totals[p_int]["dividend"] = int(amt)
+            else:
+                project_totals[p_int] = {"payment": 0, "dividend": int(amt)}
+        tp = td = 0
+        pd = []
+        for pid, vals in sorted(project_totals.items()):
+            p = db.session.get(Project, pid)
+            if not p: continue
+            pd.append({"project_name": p.name, "payment": vals["payment"], "dividend": vals["dividend"]})
+            tp += vals["payment"]; td += vals["dividend"]
+        rows.append({"user": u, "projects": pd, "total_payment": tp, "total_dividend": td, "grand_total": tp + td})
+    return render_template("personal_earnings.html", rows=rows, is_admin=is_admin_user)
 
 
 @bp.route("/transactions/<int:transaction_id>/edit", methods=["GET", "POST"])
@@ -2746,7 +2942,7 @@ def transactions_edit(transaction_id: int):
             tx.counterparty = req.new_counterparty
             tx.note = req.new_note
             req.status = "executed"
-            req.executed_at = datetime.utcnow()
+            req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             req.executed_by_user_id = current_user.id
             _log_project_activity(
                 int(tx.project_id),
@@ -2823,7 +3019,7 @@ def transactions_edit_approve(transaction_id: int):
         tx.counterparty = req.new_counterparty
         tx.note = req.new_note
         req.status = "executed"
-        req.executed_at = datetime.utcnow()
+        req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
         ntyp = "收入" if req.new_type == TransactionType.INCOME.value else "支出"
         _log_project_activity(
@@ -2872,7 +3068,7 @@ def transactions_edit_execute(transaction_id: int):
     tx.note = req.new_note
 
     req.status = "executed"
-    req.executed_at = datetime.utcnow()
+    req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     req.executed_by_user_id = current_user.id
 
     ntyp = "收入" if req.new_type == TransactionType.INCOME.value else "支出"
@@ -2960,7 +3156,7 @@ def transactions_delete_request(transaction_id: int):
     if _transaction_delete_can_execute(req):
         tx.is_void = True
         req.status = "executed"
-        req.executed_at = datetime.utcnow()
+        req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
         _log_project_activity(
             int(tx.project_id),
@@ -3013,7 +3209,7 @@ def transactions_delete_approve(transaction_id: int):
     if _transaction_delete_can_execute(req):
         tx.is_void = True
         req.status = "executed"
-        req.executed_at = datetime.utcnow()
+        req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
         _log_project_activity(
             int(tx.project_id),
@@ -3052,7 +3248,7 @@ def transactions_delete_execute(transaction_id: int):
 
     tx.is_void = True
     req.status = "executed"
-    req.executed_at = datetime.utcnow()
+    req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     req.executed_by_user_id = current_user.id
     _log_project_activity(
         int(tx.project_id),
@@ -3134,7 +3330,7 @@ def transactions_create_approve(transaction_id: int):
     if _transaction_create_can_execute(req):
         tx.status = "active"
         req.status = "executed"
-        req.executed_at = datetime.utcnow()
+        req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
         _log_project_activity(
             int(tx.project_id),
@@ -3176,7 +3372,7 @@ def transactions_create_execute(transaction_id: int):
 
     tx.status = "active"
     req.status = "executed"
-    req.executed_at = datetime.utcnow()
+    req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     req.executed_by_user_id = current_user.id
     _log_project_activity(
         int(tx.project_id),

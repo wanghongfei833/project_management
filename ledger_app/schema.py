@@ -680,5 +680,29 @@ def ensure_sqlite_schema():
             )
         )
 
+    # Add parent_project_id to projects
+    if _table_exists("projects") and not _column_exists("projects", "parent_project_id"):
+        db.session.execute(
+            text("ALTER TABLE projects ADD COLUMN parent_project_id INTEGER REFERENCES projects(id)")
+        )
+        db.session.execute(
+            text("CREATE INDEX ix_projects_parent_project_id ON projects (parent_project_id)")
+        )
+
+    # Add can_dividend to projects
+    if _table_exists("projects") and not _column_exists("projects", "can_dividend"):
+        db.session.execute(
+            text("ALTER TABLE projects ADD COLUMN can_dividend BOOLEAN NOT NULL DEFAULT 1")
+        )
+
+    # Add recipient_user_id to transactions
+    if _table_exists("transactions") and not _column_exists("transactions", "recipient_user_id"):
+        db.session.execute(
+            text("ALTER TABLE transactions ADD COLUMN recipient_user_id INTEGER REFERENCES users(id)")
+        )
+        db.session.execute(
+            text("CREATE INDEX ix_transactions_recipient_user_id ON transactions (recipient_user_id)")
+        )
+
     db.session.commit()
 

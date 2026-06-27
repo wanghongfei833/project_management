@@ -106,12 +106,16 @@
             <td class="text-end">¥ {{ '%.2f'|format(row.received_net_cents/100) }}</td>
             <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(row.remaining_net_cents/100) }}</td>
             <td>
-              <div class="d-flex align-items-center gap-2">
-                <div class="progress flex-grow-1" style="height: 6px;">
-                  <div class="progress-bar {% if pct >= 100 %}bg-success{% elif pct >= 50 %}bg-primary{% else %}bg-warning{% endif %}" role="progressbar" style="width: {{ pct }}%;"></div>
+              {% if row.project.sub_projects %}
+                <span class="small text-muted">含子项目</span>
+              {% else %}
+                <div class="d-flex align-items-center gap-2">
+                  <div class="progress flex-grow-1" style="height: 6px;">
+                    <div class="progress-bar {% if pct >= 100 %}bg-success{% elif pct >= 50 %}bg-primary{% else %}bg-warning{% endif %}" role="progressbar" style="width: {{ pct }}%;"></div>
+                  </div>
+                  <span class="small text-muted text-nowrap">{{ pct }}%</span>
                 </div>
-                <span class="small text-muted text-nowrap">{{ pct }}%</span>
-              </div>
+              {% endif %}
             </td>
             <td class="text-end">
               <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=row.project.id) }}">查看</a>
