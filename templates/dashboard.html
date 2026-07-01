@@ -98,7 +98,9 @@
       <tbody>
         {% for row in project_rows %}
           {% set pid = row.project.id %}
-          {% if row.project.parent_project_id %}
+          {% set parent_visible = row.project.parent_project_id and row.project.parent_project_id in project_rows|map(attribute='project')|map(attribute='id')|list %}
+          {% if parent_visible %}
+            {# 父项目在列表中 → 由父项目行处理子项目，跳过 #}
             {# 子项目在父项目行下面处理 #}
           {% else %}
             {% set pct = (row.received_net_cents / row.expected_net_cents * 100)|int if row.expected_net_cents > 0 else 0 %}
