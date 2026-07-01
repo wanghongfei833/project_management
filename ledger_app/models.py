@@ -431,6 +431,7 @@ class Transaction(db.Model):
     edit_requests = db.relationship("TransactionEditRequest", back_populates="transaction")
     delete_requests = db.relationship("TransactionDeleteRequest", back_populates="transaction")
     created_by = db.relationship("User", foreign_keys=[created_by_user_id])
+    recipient_user = db.relationship("User", foreign_keys=[recipient_user_id])
 
 
 class TransactionEditRequest(db.Model):
@@ -456,6 +457,7 @@ class TransactionEditRequest(db.Model):
     new_occur_date = db.Column(db.Date, nullable=False)
     new_settled = db.Column(db.Boolean, nullable=False)
     new_counterparty = db.Column(db.String(256), nullable=True)
+    new_recipient_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     new_note = db.Column(db.Text, nullable=True)
 
     created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)

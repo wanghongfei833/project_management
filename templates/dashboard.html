@@ -97,33 +97,66 @@
       </thead>
       <tbody>
         {% for row in project_rows %}
-          {% set pct = (row.received_net_cents / row.expected_net_cents * 100)|int if row.expected_net_cents > 0 else 0 %}
-          {% set pct = [pct, 100]|min %}
-          <tr>
-            <td>{{ row.project.name }}</td>
-            <td class="text-end">¥ {{ '%.2f'|format(row.expected_net_cents/100) }}</td>
-            <td class="text-end">¥ {{ '%.2f'|format(row.received_cents/100) }}</td>
-            <td class="text-end">¥ {{ '%.2f'|format(row.received_net_cents/100) }}</td>
-            <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(row.remaining_net_cents/100) }}</td>
-            <td>
-              {% if row.project.sub_projects %}
-                <span class="small text-muted">含子项目</span>
-              {% else %}
-                <div class="d-flex align-items-center gap-2">
-                  <div class="progress flex-grow-1" style="height: 6px;">
-                    <div class="progress-bar {% if pct >= 100 %}bg-success{% elif pct >= 50 %}bg-primary{% else %}bg-warning{% endif %}" role="progressbar" style="width: {{ pct }}%;"></div>
+          {% set pid = row.project.id %}
+          {% if row.project.parent_project_id %}
+            {# 子项目在父项目行下面处理 #}
+          {% else %}
+            {% set pct = (row.received_net_cents / row.expected_net_cents * 100)|int if row.expected_net_cents > 0 else 0 %}
+            {% set pct = [pct, 100]|min %}
+            <tr class="{% if row.project.sub_projects %}table-primary{% endif %}">
+              <td>
+                <span class="fw-semibold">{{ row.project.name }}</span>
+                {% if row.project.sub_projects %}<span class="badge text-bg-secondary ms-1" style="font-size:.65rem;">父项目</span>{% endif %}
+              </td>
+              <td class="text-end">¥ {{ '%.2f'|format(row.expected_net_cents/100) }}</td>
+              <td class="text-end">¥ {{ '%.2f'|format(row.received_cents/100) }}</td>
+              <td class="text-end">¥ {{ '%.2f'|format(row.received_net_cents/100) }}</td>
+              <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(row.remaining_net_cents/100) }}</td>
+              <td>
+                {% if row.project.sub_projects %}
+                  <span class="small text-muted">含子项目</span>
+                {% else %}
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="progress flex-grow-1" style="height: 6px;">
+                      <div class="progress-bar {% if pct >= 100 %}bg-success{% elif pct >= 50 %}bg-primary{% else %}bg-warning{% endif %}" role="progressbar" style="width: {{ pct }}%;"></div>
+                    </div>
+                    <span class="small text-muted text-nowrap">{{ pct }}%</span>
                   </div>
-                  <span class="small text-muted text-nowrap">{{ pct }}%</span>
-                </div>
-              {% endif %}
-            </td>
-            <td class="text-end">
-              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=row.project.id) }}">查看</a>
-              {% if is_admin and row.project.status != 'ended' %}
-                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=row.project.id) }}">编辑</a>
-              {% endif %}
-            </td>
-          </tr>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=row.project.id) }}">查看</a>
+                {% if is_admin and row.project.status != 'ended' %}
+                  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=row.project.id) }}">编辑</a>
+                {% endif %}
+              </td>
+            </tr>
+            {% for child in child_rows_map.get(pid, []) %}
+              {% set cpct = (child.received_net_cents / child.expected_net_cents * 100)|int if child.expected_net_cents > 0 else 0 %}
+              {% set cpct = [cpct, 100]|min %}
+              <tr class="table-light">
+                <td style="padding-left: 32px;">
+                  <span class="text-muted" style="font-size:.8rem;">└ </span>{{ child.project.name }}
+                  {% if not child.project.can_dividend %}<span class="badge text-bg-warning ms-1" style="font-size:.6rem;">不可分红</span>{% endif %}
+                </td>
+                <td class="text-end small">¥ {{ '%.2f'|format(child.expected_net_cents/100) }}</td>
+                <td class="text-end small">¥ {{ '%.2f'|format(child.received_cents/100) }}</td>
+                <td class="text-end small">¥ {{ '%.2f'|format(child.received_net_cents/100) }}</td>
+                <td class="text-end small fw-bold text-danger">¥ {{ '%.2f'|format(child.remaining_net_cents/100) }}</td>
+                <td>
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="progress flex-grow-1" style="height: 6px;">
+                      <div class="progress-bar {% if cpct >= 100 %}bg-success{% elif cpct >= 50 %}bg-primary{% else %}bg-warning{% endif %}" role="progressbar" style="width: {{ cpct }}%;"></div>
+                    </div>
+                    <span class="small text-muted text-nowrap">{{ cpct }}%</span>
+                  </div>
+                </td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=child.project.id) }}">查看</a>
+                </td>
+              </tr>
+            {% endfor %}
+          {% endif %}
         {% else %}
           <tr><td colspan="7" class="text-muted">暂无进行中的项目</td></tr>
         {% endfor %}

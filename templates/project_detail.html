@@ -140,19 +140,32 @@
   {% if project.sub_projects %}
     <div class="card mb-4">
       <div class="card-body">
-        <div class="fw-semibold mb-2">子项目（{{ all_sub_projects|length + project.sub_projects|length }} 个）</div>
-        <div class="d-flex flex-wrap gap-2">
-          {% for sub in all_sub_projects %}
-            <a href="{{ url_for('main.project_detail', project_id=sub.id) }}" class="btn btn-sm btn-outline-secondary">
-              {{ sub.name }}
-              {% if not sub.can_dividend %}<span class="badge text-bg-warning ms-1">不可分红</span>{% endif %}
-            </a>
-          {% else %}
-            {% for sub in project.sub_projects %}
-              <a href="{{ url_for('main.project_detail', project_id=sub.id) }}" class="btn btn-sm btn-outline-secondary">
-                {{ sub.name }}
-                {% if not sub.can_dividend %}<span class="badge text-bg-warning ms-1">不可分红</span>{% endif %}
-              </a>
+        <div class="fw-semibold mb-2">📂 子项目树（{{ all_sub_projects|length + project.sub_projects|length }} 个）</div>
+        <div class="list-group list-group-flush">
+          {% for sub in project.sub_projects %}
+            <div class="list-group-item px-0 d-flex align-items-center gap-2">
+              <span class="text-muted" style="width:18px;">├</span>
+              <a href="{{ url_for('main.project_detail', project_id=sub.id) }}" class="fw-semibold text-decoration-none flex-grow-1">{{ sub.name }}</a>
+              {% if not sub.can_dividend %}<span class="badge text-bg-warning" style="font-size:.65rem;">不可分红</span>{% endif %}
+              {% if sub.sub_projects %}
+                <span class="badge text-bg-light text-muted" style="font-size:.65rem;">{{ sub.sub_projects|length }} 个子项目</span>
+              {% endif %}
+              <a href="{{ url_for('main.project_detail', project_id=sub.id) }}" class="btn btn-sm btn-outline-secondary">查看</a>
+            </div>
+            {% for sub2 in sub.sub_projects %}
+              <div class="list-group-item px-0 d-flex align-items-center gap-2 ps-3" style="padding-left:36px !important;">
+                <span class="text-muted" style="width:18px;">└</span>
+                <a href="{{ url_for('main.project_detail', project_id=sub2.id) }}" class="text-decoration-none flex-grow-1">{{ sub2.name }}</a>
+                {% if not sub2.can_dividend %}<span class="badge text-bg-warning" style="font-size:.65rem;">不可分红</span>{% endif %}
+                <a href="{{ url_for('main.project_detail', project_id=sub2.id) }}" class="btn btn-sm btn-outline-secondary">查看</a>
+              </div>
+              {% for sub3 in sub2.sub_projects %}
+                <div class="list-group-item px-0 d-flex align-items-center gap-2 ps-5" style="padding-left:54px !important;">
+                  <a href="{{ url_for('main.project_detail', project_id=sub3.id) }}" class="text-decoration-none flex-grow-1">└ {{ sub3.name }}</a>
+                  {% if not sub3.can_dividend %}<span class="badge text-bg-warning" style="font-size:.65rem;">不可分红</span>{% endif %}
+                  <a href="{{ url_for('main.project_detail', project_id=sub3.id) }}" class="btn btn-sm btn-outline-secondary">查看</a>
+                </div>
+              {% endfor %}
             {% endfor %}
           {% endfor %}
         </div>
@@ -557,7 +570,7 @@
               <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
               <td class="text-end">¥ {{ '%.2f'|format(t.amount_cents/100) }}</td>
               <td><span class="badge text-bg-warning">待审核</span></td>
-              <td>{{ t.counterparty or '' }}</td>
+              <td>{% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}{{ user_name_map[t.recipient_user_id] }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
               <td class="small">{{ t.created_by.username if t.created_by else '—' }}</td>
               <td class="text-truncate" style="max-width: 360px;">{{ t.note or '' }}</td>
               <td>
@@ -649,7 +662,7 @@
               {% endif %}
             </td>
             <td class="text-end small fw-semibold">¥ {{ '%.2f'|format((balance_after_by_tx_id.get(t.id, 0))/100) }}</td>
-            <td>{{ t.counterparty or '' }}</td>
+            <td>{% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}{{ user_name_map[t.recipient_user_id] }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
             <td class="small">{{ t.created_by.username if t.created_by else '—' }}</td>
             <td class="text-truncate" style="max-width: 360px;">{{ t.note or '' }}</td>
             <td>

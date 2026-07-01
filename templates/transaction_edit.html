@@ -13,7 +13,7 @@
   </div>
 
   <div class="alert alert-info">
-    提交后将创建“修改申请”。流水字段在<strong>「全体项目成员均已同意」或「至少一名管理员已点同意修改」</strong>后，由管理员点击「执行修改」生效。
+    提交后将创建"修改申请"。流水字段在<strong>「全体项目成员均已同意」或「至少一名管理员已点同意修改」</strong>后自动生效。
     <strong>凭证</strong>：勾选下方「删除」并提交、或选择新文件上传，会在<strong>本次提交时立即生效</strong>（与字段审批流程无关）。
   </div>
 
@@ -43,7 +43,7 @@
       <div class="row g-3">
         <div class="col-md-3">
           <label class="form-label">类型</label>
-          {{ form.type(class="form-select") }}
+          {{ form.type(class="form-select", id="tx_type") }}
         </div>
         <div class="col-md-3">
           <label class="form-label">金额（元）</label>
@@ -60,12 +60,17 @@
           </div>
         </div>
 
-        <div class="col-12">
+        <div class="col-md-6">
           <label class="form-label">对方</label>
-          {{ form.counterparty(class="form-control") }}
+          {{ form.counterparty(class="form-select", id="tx_counterparty") }}
+          <div id="cp_hint" class="form-text"></div>
+        </div>
+        <div class="col-md-6" id="recipient_wrap" style="display:none;">
+          <label class="form-label">选择项目人员</label>
+          {{ form.recipient_user_id(class="form-select") }}
         </div>
         <div class="col-12">
-          <label class="form-label">备注</label>
+          <label class="form-label">备注 <span id="note_required_hint" class="text-danger" style="display:none;">（必填）</span></label>
           {{ form.note(class="form-control", rows="3") }}
         </div>
         <div class="col-12">
@@ -80,4 +85,56 @@
       </div>
     </div>
   </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var typeEl = document.getElementById('tx_type');
+  var cpEl = document.getElementById('tx_counterparty');
+  var rw = document.getElementById('recipient_wrap');
+  var nh = document.getElementById('note_required_hint');
+  var ch = document.getElementById('cp_hint');
+
+  var incomeKeys = ['业主[甲方]', '其他（收入）'];
+  var expenseKeys = ['项目人员', '报销款', '中介费', '供应商', '业主退款', '其他'];
+
+  function filterOptions() {
+    if (!cpEl || !typeEl) return;
+    var t = typeEl.value;
+    var keys = t === 'income' ? incomeKeys : expenseKeys;
+    for (var i = 0; i < cpEl.options.length; i++) {
+      cpEl.options[i].style.display = keys.indexOf(cpEl.options[i].value) >= 0 ? '' : 'none';
+    }
+    if (keys.indexOf(cpEl.value) < 0) {
+      for (var i = 0; i < cpEl.options.length; i++) {
+        if (keys.indexOf(cpEl.options[i].value) >= 0) {
+          cpEl.value = cpEl.options[i].value; break;
+        }
+      }
+    }
+    syncDisplay();
+  }
+
+  function syncDisplay() {
+    if (!cpEl) return;
+    var v = cpEl.value;
+    rw.style.display = (v === '项目人员') ? '' : 'none';
+    nh.style.display = (v === '其他（收入）') ? '' : 'none';
+    if (ch) {
+      if (v === '其他（收入）') ch.textContent = '请备注收入来源';
+      else if (v === '报销款') ch.textContent = '请备注报销用途';
+      else if (v === '中介费') ch.textContent = '中介/介绍费用';
+      else if (v === '业主退款') ch.textContent = '退还给业主的款项';
+      else if (v === '其他') ch.textContent = '请备注具体用途';
+      else ch.textContent = '';
+    }
+  }
+
+  if (typeEl) typeEl.addEventListener('change', filterOptions);
+  if (cpEl) cpEl.addEventListener('change', syncDisplay);
+  filterOptions();
+  syncDisplay();
+})();
+</script>
 {% endblock %}

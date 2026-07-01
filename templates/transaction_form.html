@@ -67,7 +67,7 @@
   var ch = document.getElementById('cp_hint');
 
   var incomeKeys = ['业主[甲方]', '其他（收入）'];
-  var expenseKeys = ['项目人员', '报销款', '中介费', '供应商'];
+  var expenseKeys = ['项目人员', '报销款', '中介费', '供应商', '业主退款', '其他'];
 
   function filterOptions() {
     if (!cpEl || !typeEl) return;
@@ -95,6 +95,8 @@
       if (v === '其他（收入）') ch.textContent = '请备注收入来源';
       else if (v === '报销款') ch.textContent = '请备注报销用途';
       else if (v === '中介费') ch.textContent = '中介/介绍费用';
+      else if (v === '业主退款') ch.textContent = '退还给业主的款项';
+      else if (v === '其他') ch.textContent = '请备注具体用途';
       else ch.textContent = '';
     }
   }

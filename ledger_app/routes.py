@@ -34,8 +34,9 @@ from .project_finance import (
 from .forms import (
     ChangePasswordForm,
     CP_EXPENSE_BROKER,
-    CP_EXPENSE_DIVIDEND,
     CP_EXPENSE_MEMBER,
+    CP_EXPENSE_OTHER,
+    CP_EXPENSE_REFUND,
     CP_EXPENSE_REIMBURSE,
     CP_EXPENSE_SUPPLIER,
     CP_INCOME_OTHER,
@@ -540,6 +541,14 @@ def dashboard():
         active_rows,
         key=lambda r: r["remaining_net_cents"], reverse=True
     )[:10]
+
+    # 构建子项目映射：{parent_id: [child_row, ...]}
+    child_rows_map = {}
+    for r in active_rows:
+        p = r["project"]
+        if p.parent_project_id:
+            ppid = int(p.parent_project_id)
+            child_rows_map.setdefault(ppid, []).append(r)
     chart_projects = {
         "labels": [r["project"].name for r in top_projects],
         "remaining": [int(r["remaining_net_cents"]) / 100 for r in top_projects],
@@ -573,6 +582,7 @@ def dashboard():
         active_count=active_count,
         ended_count=ended_count,
         ended_rows=ended_rows,
+        child_rows_map=child_rows_map,
         ended_total_income=ended_total_income,
         ended_total_expense=ended_total_expense,
         ended_total_profit=ended_total_profit,
@@ -871,6 +881,8 @@ def projects_edit(project_id: int):
         for pp in parent_candidates
     }
     admin_user_ids = _admin_user_ids()
+    # 设置父项目下拉选项（必须在 validate_on_submit 之前）
+    form.parent_project_id.choices = [(0, "（无——独立项目）")] + [(pp.id, pp.name) for pp in parent_candidates]
     # 计算父项目成员 ID
     def _get_parent_member_ids():
         pid = form.parent_project_id.data or p.parent_project_id
@@ -904,7 +916,6 @@ def projects_edit(project_id: int):
         form.note.data = p.note or ""
         form.parent_project_id.data = p.parent_project_id or 0
         form.can_dividend.data = 1 if p.can_dividend else 0
-        form.parent_project_id.choices = [(0, "（无——独立项目）")] + [(pp.id, pp.name) for pp in parent_candidates]
         current_members = ProjectMember.query.filter_by(project_id=p.id).all()
         form.member_user_ids.data = [m.user_id for m in current_members]
 
@@ -2368,7 +2379,7 @@ def project_detail(project_id: int):
     tx_page = request.args.get("tx_page", 1, type=int) or 1
     tx_page = max(tx_page, 1)
     tx_pagination = (
-        Transaction.query.options(joinedload(Transaction.attachments), joinedload(Transaction.created_by))
+        Transaction.query.options(joinedload(Transaction.attachments), joinedload(Transaction.created_by), joinedload(Transaction.recipient_user))
         .filter(query_pid_filter)
         .filter(Transaction.is_void.is_(False), Transaction.status == "active")
         .order_by(Transaction.occur_date.desc(), Transaction.id.desc())
@@ -2377,7 +2388,7 @@ def project_detail(project_id: int):
     txs = tx_pagination.items
 
     pending_txs = (
-        Transaction.query.options(joinedload(Transaction.attachments), joinedload(Transaction.created_by))
+        Transaction.query.options(joinedload(Transaction.attachments), joinedload(Transaction.created_by), joinedload(Transaction.recipient_user))
         .filter(query_pid_filter)
         .filter(Transaction.is_void.is_(False), Transaction.status == "pending")
         .order_by(Transaction.created_at.desc(), Transaction.id.desc())
@@ -2619,6 +2630,9 @@ def project_detail(project_id: int):
         .all()
     )
 
+    # 构建用户ID→名称映射（用于显示项目人员姓名）
+    user_name_map = {u.id: u.username for u in User.query.all()}
+
     # 递归收集所有子孙项目（用于父项目页展示）
     all_sub_projects = []
     if is_parent:
@@ -2661,6 +2675,7 @@ def project_detail(project_id: int):
         delete_req_by_tx=delete_req_by_tx,
         delete_ready_by_tx=delete_ready_by_tx,
         delete_can_execute_by_tx=delete_can_execute_by_tx,
+        user_name_map=user_name_map,
         adjustments=adjustments,
         members=members,
         delete_req=delete_req,
@@ -2890,12 +2905,24 @@ def transactions_edit(transaction_id: int):
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     form = TransactionEditForm()
+    # 设置对方选项（含当前值，保证旧数据可编辑）
+    _set_counterparty_choices(form, int(tx.project_id))
+    old_cp = tx.counterparty or ""
+    if old_cp and old_cp not in [c[0] for c in form.counterparty.choices]:
+        form.counterparty.choices = [(old_cp, f"{old_cp}（原值）")] + form.counterparty.choices
+    form.recipient_user_id.choices = [(0, "（不指定）")] + [
+        (u.id, u.username) for u in
+        db.session.query(User).join(ProjectMember, ProjectMember.user_id == User.id)
+        .filter(ProjectMember.project_id == int(tx.project_id))
+        .order_by(User.username.asc()).all()
+    ]
     if request.method == "GET":
         form.type.data = tx.type
         form.amount_yuan.data = cents_to_yuan(int(tx.amount_cents))
         form.occur_date.data = tx.occur_date
         form.settled.data = bool(tx.settled)
-        form.counterparty.data = tx.counterparty or ""
+        form.counterparty.data = old_cp
+        form.recipient_user_id.data = tx.recipient_user_id or 0
         form.note.data = tx.note or ""
 
     if form.validate_on_submit():
@@ -2912,6 +2939,7 @@ def transactions_edit(transaction_id: int):
             new_occur_date=form.occur_date.data,
             new_settled=bool(form.settled.data),
             new_counterparty=form.counterparty.data or None,
+            new_recipient_user_id=form.recipient_user_id.data if form.counterparty.data == '项目人员' else None,
             new_note=raw_note,
             created_by_user_id=current_user.id,
         )
@@ -2940,6 +2968,7 @@ def transactions_edit(transaction_id: int):
             tx.occur_date = req.new_occur_date
             tx.settled = bool(req.new_settled)
             tx.counterparty = req.new_counterparty
+            tx.recipient_user_id = req.new_recipient_user_id
             tx.note = req.new_note
             req.status = "executed"
             req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)

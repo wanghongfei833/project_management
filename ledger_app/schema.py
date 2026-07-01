@@ -704,5 +704,11 @@ def ensure_sqlite_schema():
             text("CREATE INDEX ix_transactions_recipient_user_id ON transactions (recipient_user_id)")
         )
 
+    # Add new_recipient_user_id to transaction_edit_requests
+    if _table_exists("transaction_edit_requests") and not _column_exists("transaction_edit_requests", "new_recipient_user_id"):
+        db.session.execute(
+            text("ALTER TABLE transaction_edit_requests ADD COLUMN new_recipient_user_id INTEGER REFERENCES users(id)")
+        )
+
     db.session.commit()
 
