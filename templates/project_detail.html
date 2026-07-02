@@ -211,13 +211,18 @@
         <ul class="list-unstyled mb-0 small">
           {% for log in activity_logs %}
             <li class="border-bottom py-2">
-              <div class="text-muted">
-                {{ log.created_at.strftime('%Y-%m-%d %H:%M') }}
-                {% if log.actor %} · {{ log.actor.username }}{% endif %}
+              <div class="d-flex justify-content-between">
+                <div class="text-muted">
+                  {{ log.created_at.strftime('%m-%d %H:%M') }}
+                  {% if log.actor %} · {{ log.actor.username }}{% endif %}
+                </div>
+                {% if log.detail %}
+                  <a href="#" class="small" onclick="event.preventDefault(); var el=document.getElementById('log-detail-{{ log.id }}'); el.style.display=el.style.display==='none'?'':'none';">详情</a>
+                {% endif %}
               </div>
               <div>{{ log.summary }}</div>
               {% if log.detail %}
-                <div class="text-muted font-monospace mt-1" style="font-size: .75rem;">{{ log.detail }}</div>
+                <div id="log-detail-{{ log.id }}" class="text-muted font-monospace mt-1" style="font-size:.75rem;display:none;">{{ log.detail }}</div>
               {% endif %}
             </li>
           {% else %}
@@ -231,27 +236,25 @@
   {% if project_updates %}
     <div class="card mb-4">
       <div class="card-body">
-        <div class="fw-semibold mb-3">进展记录</div>
-        {% for u in project_updates %}
-          <div class="border rounded p-3 mb-3">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <div class="small text-muted">
-                {{ u.created_at }}
-                {% if u.created_by_user_id %}
-                  · 用户 ID：{{ u.created_by_user_id }}
-                {% endif %}
-              </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="fw-semibold">进展记录</div>
+          <a href="{{ url_for('main.project_progress', project_id=project.id) }}" class="btn btn-sm btn-outline-primary">查看全部</a>
+        </div>
+        {% for u in project_updates[:5] %}
+          <div class="border-bottom py-2">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="badge rounded-pill text-bg-light" style="font-size:.65rem;">{{ u.created_at.strftime('%m-%d %H:%M') if u.created_at else '' }}</span>
+              <span class="small fw-semibold">{{ u.author.username if u.author else '?' }}</span>
             </div>
-            <div class="mb-2" style="white-space: pre-wrap;">{{ u.body }}</div>
+            <div class="small fw-medium">{{ u.title or '（无标题）' }}</div>
+            <div class="small text-muted" style="white-space:pre-wrap;">{{ u.body[:100] }}{% if u.body|length > 100 %}…{% endif %}</div>
             {% if u.attachments %}
-              <div class="d-flex flex-wrap gap-2">
-                {% for a in u.attachments %}
-                  {% if a.filename.lower().endswith('.png') or a.filename.lower().endswith('.jpg') or a.filename.lower().endswith('.jpeg') or a.filename.lower().endswith('.webp') or a.filename.lower().endswith('.gif') %}
-                    <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank" class="d-block">
-                      <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" alt="{{ a.filename }}" style="max-height: 160px; border-radius: 8px;">
-                    </a>
+              <div class="d-flex flex-wrap gap-1 mt-1">
+                {% for a in u.attachments[:3] %}
+                  {% if a.filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.gif')) %}
+                    <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" alt="" style="height:40px;border-radius:4px;">
                   {% else %}
-                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a>
+                    <span class="badge text-bg-light border" style="font-size:.65rem;">📎</span>
                   {% endif %}
                 {% endfor %}
               </div>

@@ -1878,6 +1878,7 @@ def project_update_post(project_id: int):
 
     u = ProjectUpdate(
         project_id=p.id,
+        title=form.title.data or None,
         body=form.body.data,
         created_by_user_id=current_user.id,
     )
@@ -1893,7 +1894,7 @@ def project_update_post(project_id: int):
     )
     db.session.commit()
     flash("进展已提交", "success")
-    return redirect(url_for("main.project_detail", project_id=p.id))
+    return redirect(url_for("main.project_progress", project_id=p.id))
 
 
 @bp.route("/projects/<int:project_id>/dividend", methods=["GET"])
@@ -2658,7 +2659,8 @@ def project_detail(project_id: int):
     )
 
     project_updates = (
-        ProjectUpdate.query.filter_by(project_id=p.id)
+        ProjectUpdate.query.options(joinedload(ProjectUpdate.attachments), joinedload(ProjectUpdate.author))
+        .filter_by(project_id=p.id)
         .order_by(ProjectUpdate.created_at.desc())
         .limit(50)
         .all()

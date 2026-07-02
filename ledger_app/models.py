@@ -381,6 +381,7 @@ class ProjectUpdate(db.Model):
         db.Integer, db.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     body = db.Column(db.Text, nullable=False)
+    title = db.Column(db.String(256), nullable=True)
     created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 

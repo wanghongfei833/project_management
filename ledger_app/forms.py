@@ -85,7 +85,8 @@ class ProjectEndDateChangeForm(FlaskForm):
 
 
 class ProjectUpdateForm(FlaskForm):
-    body = TextAreaField("进展内容", validators=[DataRequired(), Length(min=1, max=20000)])
+    title = StringField("标题", validators=[Optional(), Length(max=256)])
+    body = TextAreaField("详细内容", validators=[DataRequired(), Length(min=1, max=20000)])
 
 
 class ProjectDividendForm(FlaskForm):

@@ -710,5 +710,11 @@ def ensure_sqlite_schema():
             text("ALTER TABLE transaction_edit_requests ADD COLUMN new_recipient_user_id INTEGER REFERENCES users(id)")
         )
 
+    # Add title to project_updates
+    if _table_exists("project_updates") and not _column_exists("project_updates", "title"):
+        db.session.execute(
+            text("ALTER TABLE project_updates ADD COLUMN title VARCHAR(256)")
+        )
+
     db.session.commit()
 
