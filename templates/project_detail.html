@@ -190,24 +190,20 @@
 
         <div class="col-lg-12">
           <a href="{{ url_for('main.project_logs', project_id=project.id) }}" class="btn btn-outline-primary btn-sm">
-            📋 项目日志
+            📋 项目日志 · {{ project_updates|length }} 条
           </a>
-          <span class="text-muted small ms-2">{{ project_updates|length }} 条记录</span>
         </div>
-      </div>
-    </div>
-  </div>
 
   <div class="card mb-4">
     <div class="card-header py-2" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#activityLogCollapse" aria-expanded="false" aria-controls="activityLogCollapse">
       <div class="d-flex justify-content-between align-items-center">
-        <span class="fw-semibold">项目日志</span>
+        <span class="fw-semibold">操作记录</span>
         <span class="text-muted small">点击展开 ▼</span>
       </div>
     </div>
     <div id="activityLogCollapse" class="collapse">
       <div class="card-body">
-        <p class="small text-muted mb-3">系统自动记录关键操作（与下方「进展记录」不同：此处为配置、流水、审批、删除等事件）。</p>
+        <p class="small text-muted mb-3">系统自动记录关键操作（审批、删除、配置变更等）。</p>
         <ul class="list-unstyled mb-0 small">
           {% for log in activity_logs %}
             <li class="border-bottom py-2">
@@ -236,7 +232,7 @@
   {% if project_updates %}
     <div class="card mb-4">
       <div class="card-body py-2 d-flex justify-content-between align-items-center">
-        <span class="fw-semibold small">📋 进展记录 · {{ project_updates|length }} 条</span>
+        <span class="fw-semibold small">📋 项目日志 · {{ project_updates|length }} 条</span>
         <a href="{{ url_for('main.project_logs', project_id=project.id) }}" class="btn btn-sm btn-outline-primary">查看日志</a>
       </div>
     </div>
