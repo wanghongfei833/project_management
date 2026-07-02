@@ -201,13 +201,14 @@
           <span class="badge text-bg-primary log-filter active" data-filter="all" style="cursor:pointer;">📋 全部日志</span>
           <span class="badge text-bg-light border log-filter" data-filter="project" style="cursor:pointer;">📁 项目日志</span>
           <span class="badge text-bg-light border log-filter" data-filter="note" style="cursor:pointer;">📁 进展日志</span>
+          <a href="{{ url_for('main.project_logs_new', project_id=project.id) }}" class="badge text-bg-success" style="text-decoration:none;">+ 新增进展日志</a>
           <span class="badge text-bg-light border log-filter" data-filter="finance" style="cursor:pointer;">💳 财政日志</span>
           <span class="badge text-bg-light border log-filter" data-filter="other" style="cursor:pointer;">🔧 其他日志</span>
         </div>
         <ul class="list-unstyled mb-0 small">
           {% for log in activity_logs %}
             {% set log_type = log.action.split('.')[0] %}
-            <li class="border-bottom py-2 log-item" data-log-type="{{ log_type }}" data-log-action="{{ log.action }}">
+            <li class="border-bottom py-2 log-item" data-log-type="{{ log_type }}" data-log-action="{{ log.action }}" {% if log.action == 'project.update_note' and log.detail %}style="cursor:pointer;" onclick="location.href='{{ url_for('main.project_logs', project_id=project.id) }}?log_id={{ log.detail.split('=')[1].split(',')[0] }}';"{% endif %}>
               <div class="d-flex justify-content-between">
                 <div class="text-muted">
                   {{ log.created_at.strftime('%m-%d %H:%M') }}
