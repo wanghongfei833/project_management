@@ -274,38 +274,16 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
     </div>
   {% endif %}
 
-  <details class="mt-3"><summary class="fw-semibold text-primary" style="cursor:pointer;">展开：回款与合同明细、中介拆分</summary>
-        <div class="text-muted small mt-2 mb-3">
-          {% if finance.is_net_from_broker %}
-            收入流水为<strong>净额</strong>（中介已从客户款中扣除其部分）。下表「等价客户全额」仅供对账理解。
-          {% else %}
-            收入流水为<strong>客户全额</strong>；我方净额 = 合同全额 − 中介（比例或固定）。
-          {% endif %}
-        </div>
-        <div class="table-responsive">
-          <table class="table table-sm align-middle mb-0">
-            <tbody>
-              {% if finance.is_net_from_broker %}
-                <tr><td class="text-muted">我方合同应收（主口径）</td><td class="text-end fw-semibold">¥ {{ '%.2f'|format(expected_net_cents/100) }}</td></tr>
-                <tr><td class="text-muted">等价客户侧全额（推算）</td><td class="text-end">¥ {{ '%.2f'|format(finance.contract_display_gross_equiv_cents/100) }}</td></tr>
-                <tr><td class="text-muted">已回款（流水净额）</td><td class="text-end">¥ {{ '%.2f'|format(received_cents/100) }}</td></tr>
-                <tr><td class="text-muted">我方已收净额</td><td class="text-end">¥ {{ '%.2f'|format(received_net_cents/100) }}</td></tr>
-                <tr><td class="text-muted">我方未收净额</td><td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(remaining_net_cents/100) }}</td></tr>
-              {% else %}
-                <tr><td class="text-muted">客户合同全额</td><td class="text-end fw-semibold">¥ {{ '%.2f'|format(expected_total_cents/100) }}</td></tr>
-                <tr><td class="text-muted">我方应收净额</td><td class="text-end">¥ {{ '%.2f'|format(expected_net_cents/100) }}</td></tr>
-                <tr><td class="text-muted">已回款（客户全额流水）</td><td class="text-end">¥ {{ '%.2f'|format(received_cents/100) }}</td></tr>
-                <tr><td class="text-muted">我方已收净额</td><td class="text-end">¥ {{ '%.2f'|format(received_net_cents/100) }}</td></tr>
-                <tr><td class="text-muted">未回款（客户全额）</td><td class="text-end">¥ {{ '%.2f'|format(remaining_gross_cents/100) }}</td></tr>
-                <tr><td class="text-muted">我方未收净额</td><td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(remaining_net_cents/100) }}</td></tr>
-              {% endif %}
-              <tr><td class="text-muted">已付款支出</td><td class="text-end">¥ {{ '%.2f'|format(paid_cents/100) }}</td></tr>
-              <tr><td class="text-muted">中介费用（合同口径）</td><td class="text-end">¥ {{ '%.2f'|format(broker_fee_expected_total_cents/100) }}</td></tr>
-              <tr><td class="text-muted">中介对应（已回款推算）</td><td class="text-end">¥ {{ '%.2f'|format(broker_estimated_cents/100) }}</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </details>
+  <details class="mt-2"><summary class="small text-muted" style="cursor:pointer;">合同与回款详情</summary>
+    <div class="row g-2 mt-2 small">
+      <div class="col-md-4">合同全额：<span class="fw-semibold">¥ {{ '%.2f'|format(expected_total_cents/100) }}</span></div>
+      <div class="col-md-4">已回款：<span class="fw-semibold">¥ {{ '%.2f'|format(received_cents/100) }}</span></div>
+      <div class="col-md-4">未回款：<span class="fw-semibold text-danger">¥ {{ '%.2f'|format(remaining_gross_cents/100) }}</span></div>
+      <div class="col-md-4">我方净应收：<span class="fw-semibold">¥ {{ '%.2f'|format(expected_net_cents/100) }}</span></div>
+      <div class="col-md-4">我方已收净：<span class="fw-semibold">¥ {{ '%.2f'|format(received_net_cents/100) }}</span></div>
+      <div class="col-md-4">我方未收净：<span class="fw-semibold text-danger">¥ {{ '%.2f'|format(remaining_net_cents/100) }}</span></div>
+    </div>
+  </details>
     </div>
   </div>
 
