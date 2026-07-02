@@ -1851,7 +1851,7 @@ def project_progress(project_id: int):
         .order_by(ProjectUpdate.created_at.desc())
         .paginate(page=page, per_page=15, error_out=False)
     )
-    can_post = project.status != "ended" and _is_project_member(p.id, current_user.id)
+    can_post = p.status != "ended" and _is_project_member(p.id, current_user.id)
     return render_template("project_progress.html",
                           project=p, updates=pagination, can_post=can_post,
                           form=ProjectUpdateForm(), is_admin=is_admin())
