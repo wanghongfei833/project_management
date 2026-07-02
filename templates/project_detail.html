@@ -189,22 +189,11 @@
 
 
         <div class="col-lg-12">
-          <div class="fw-semibold mb-2">提交项目进展（图文）</div>
-          {% if project.status != 'ended' %}
-          <form method="post" action="{{ url_for('main.project_update_post', project_id=project.id) }}" enctype="multipart/form-data">
-            {{ update_form.hidden_tag() }}
-            <div class="mb-2">
-              <label class="form-label">文字</label>
-              {{ update_form.body(class="form-control", rows="4", placeholder="写清楚进展、风险、下一步…") }}
-            </div>
-            <div class="mb-2">
-              <label class="form-label">图片/附件（可多选）</label>
-              <input class="form-control" type="file" name="attachments" multiple>
-            </div>
-            <button class="btn btn-sm btn-primary" type="submit">发布进展</button>
-          </form>
+          <a href="{{ url_for('main.project_progress', project_id=project.id) }}" class="btn btn-outline-primary btn-sm">
+            📝 项目进展
+          </a>
+          <span class="text-muted small ms-2">{{ project_updates|length }} 条记录</span>
         </div>
-      {% endif %}
       </div>
     </div>
   </div>

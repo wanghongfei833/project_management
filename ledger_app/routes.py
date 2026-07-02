@@ -1832,6 +1832,31 @@ def project_revive_cancel(project_id: int):
     return redirect(url_for("main.project_detail", project_id=p.id))
 
 
+@bp.route("/projects/<int:project_id>/progress", methods=["GET"])
+@login_required
+def project_progress(project_id: int):
+    p = db.session.get(Project, project_id)
+    if not p:
+        flash("项目不存在", "warning")
+        return redirect(url_for("main.projects_list"))
+    if not is_admin() and not _can_view_project(int(current_user.id), project_id):
+        flash("无权查看", "danger")
+        return redirect(url_for("main.projects_list"))
+
+    page = request.args.get("page", 1, type=int) or 1
+    page = max(page, 1)
+    pagination = (
+        ProjectUpdate.query.options(joinedload(ProjectUpdate.attachments), joinedload(ProjectUpdate.author))
+        .filter_by(project_id=p.id)
+        .order_by(ProjectUpdate.created_at.desc())
+        .paginate(page=page, per_page=15, error_out=False)
+    )
+    can_post = project.status != "ended" and _is_project_member(p.id, current_user.id)
+    return render_template("project_progress.html",
+                          project=p, updates=pagination, can_post=can_post,
+                          form=ProjectUpdateForm(), is_admin=is_admin())
+
+
 @bp.route("/projects/<int:project_id>/updates", methods=["POST"])
 @login_required
 def project_update_post(project_id: int):

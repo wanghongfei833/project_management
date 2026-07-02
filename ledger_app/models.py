@@ -386,6 +386,7 @@ class ProjectUpdate(db.Model):
 
     project = db.relationship("Project", back_populates="updates")
     attachments = db.relationship("ProjectUpdateAttachment", back_populates="update")
+    author = db.relationship("User")
 
 
 class ProjectUpdateAttachment(db.Model):

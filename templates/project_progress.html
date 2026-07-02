@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · 进展{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <h1 class="h4 mb-1">{{ project.name }}</h1>
+      <div class="text-muted small">项目进展</div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=project.id) }}">返回项目</a>
+  </div>
+
+  {% if can_post %}
+    <div class="card mb-4">
+      <div class="card-body">
+        <form method="post" action="{{ url_for('main.project_update_post', project_id=project.id) }}" enctype="multipart/form-data">
+          {{ form.hidden_tag() }}
+          <div class="mb-2">
+            {{ form.body(class="form-control", rows="2", placeholder="记录进展（如：完成第一稿、采购材料已入库…）") }}
+          </div>
+          <div class="d-flex gap-2 align-items-center">
+            <input class="form-control form-control-sm" type="file" name="attachments" multiple style="max-width: 300px;">
+            <button class="btn btn-primary btn-sm" type="submit">提交</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="timeline">
+    {% for u in updates.items %}
+      <div class="d-flex gap-3 mb-3 pb-3 border-bottom">
+        <div class="text-center" style="min-width: 50px;">
+          <div class="badge rounded-pill text-bg-light" style="font-size:.7rem;">{{ u.created_at.strftime('%m-%d') }}</div>
+          <div class="small text-muted mt-1" style="font-size:.7rem;">{{ u.created_at.strftime('%H:%M') }}</div>
+        </div>
+        <div class="flex-grow-1">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="fw-semibold small">{{ u.author.username if u.author else '?' }}</span>
+          </div>
+          <div class="small" style="white-space: pre-wrap;">{{ u.body }}</div>
+          {% if u.attachments %}
+            <div class="d-flex flex-wrap gap-1 mt-1">
+              {% for a in u.attachments %}
+                <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank" class="badge text-bg-light border text-decoration-none">
+                  📎 {{ a.filename }}
+                </a>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}
+      <div class="text-muted text-center py-5">暂无进展记录</div>
+    {% endfor %}
+  </div>
+
+  {% if updates.pages > 1 %}
+    <nav class="mt-2">
+      <ul class="pagination pagination-sm justify-content-center">
+        {% if updates.has_prev %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.project_progress', project_id=project.id, page=updates.prev_num) }}">上一页</a></li>
+        {% endif %}
+        <li class="page-item disabled"><span class="page-link">{{ updates.page }} / {{ updates.pages }}</span></li>
+        {% if updates.has_next %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('main.project_progress', project_id=project.id, page=updates.next_num) }}">下一页</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+{% endblock %}
