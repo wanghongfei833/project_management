@@ -55,205 +55,123 @@
     </div>
   {% endif %}
 
+
   <div class="card mb-4">
     <div class="card-body">
-      <div class="d-flex justify-content-between align-items-start">
-        <div>
-          <div class="text-muted small">项目信息</div>
-          <div class="fw-semibold">
+      <div class="fw-semibold mb-3">项目信息</div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="text-muted small mb-1">项目成员</div>
+          <div class="d-flex flex-wrap gap-1">
             {% for u in members %}
-              <span class="badge member-badge text-bg-light border">{{ u.username }}</span>
+              <span class="badge border {% if u.id == project.leader_user_id %}text-bg-primary{% else %}text-bg-light{% endif %} member-badge">{{ u.username }}</span>
             {% else %}
               <span class="text-muted">暂无成员</span>
             {% endfor %}
           </div>
         </div>
+        <div class="col-md-6">
+          <div class="text-muted small mb-1">周期</div>
+          <div class="text-muted small">{{ project.planned_start_date }} → {{ project.planned_end_date }}</div>
+          <div class="text-muted small">
+            {% if days_left < 0 %}
+              <span class="text-danger fw-bold">逾期 {{ overdue_days }} 天</span>
+            {% else %}
+              剩余 <span class="fw-semibold">{{ days_left }}</span> 天
+            {% endif %}
+            · 今天 {{ today }}
+          </div>
+          <div class="d-flex align-items-center gap-2 mt-2">
+            <div class="progress flex-grow-1" style="height:5px;border-radius:3px;">
+              <div class="progress-bar {% if days_left < 0 %}progress-bar-striped bg-danger{% endif %}" role="progressbar" style="width:{{ progress_pct }}%;"></div>
+            </div>
+            <span class="small text-muted text-nowrap">{{ progress_pct }}%</span>
+            {% if project.status != 'ended' %}<button class="btn btn-sm btn-outline-secondary ms-1" data-bs-toggle="modal" data-bs-target="#endDateModal">修改日期</button>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <hr class="my-3">
+
+      <div class="d-flex justify-content-between align-items-start">
+        <div></div>
         <div class="text-end">
           <div class="text-muted small">终止项目</div>
           {% set member_ids = members|map(attribute='id')|list %}
           {% if project.status == 'ended' %}
             <span class="badge text-bg-danger">已终止</span>
           {% elif end_req %}
-            <div class="small">
-              已发起终止申请，同意：
-              {{ end_approved_ids|length }} / {{ members|length }}
-            </div>
+            <div class="small">已发起终止申请，同意：{{ end_approved_ids|length }} / {{ members|length }}</div>
             {% if current_user.id in end_approved_ids %}
               <span class="badge text-bg-secondary">你已同意</span>
             {% elif current_user.id in member_ids or is_admin %}
               <form method="post" action="{{ url_for('main.project_end_approve', project_id=project.id) }}" class="d-inline">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-outline-danger" type="submit">同意终止</button>
-              </form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="submit">同意终止</button></form>
             {% endif %}
             {% if is_admin or end_req.created_by_user_id == current_user.id %}
-              <form method="post" action="{{ url_for('main.project_end_cancel', project_id=project.id) }}" class="d-inline ms-1"
-                    onsubmit="return confirm('确认取消终止申请？');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button>
-              </form>
+              <form method="post" action="{{ url_for('main.project_end_cancel', project_id=project.id) }}" class="d-inline ms-1" onsubmit="return confirm('确认取消终止申请？');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button></form>
             {% endif %}
           {% elif current_user.id in member_ids or is_admin %}
-            <form method="post" action="{{ url_for('main.project_end_request', project_id=project.id) }}"
-                  onsubmit="return confirm('确认发起终止项目申请？终止后项目将冻结为只读，不可再操作流水/分红等。');">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-sm btn-outline-danger" type="submit">发起终止</button>
-            </form>
+            <form method="post" action="{{ url_for('main.project_end_request', project_id=project.id) }}" onsubmit="return confirm('确认发起终止项目申请？终止后项目将冻结为只读，不可再操作流水/分红等。');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="submit">发起终止</button></form>
           {% endif %}
         </div>
       </div>
 
-      <div class="mt-3 d-flex gap-2 flex-wrap">
+      <div class="mt-2 d-flex gap-2 flex-wrap">
         {% if is_admin and not delete_req and project.status != 'ended' %}
-          <form method="post" action="{{ url_for('main.projects_delete_request', project_id=project.id) }}"
-                onsubmit="return confirm('确认发起删除申请？需要所有项目信息同意后才会真正删除（包含流水/凭证/追加记录）。');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="btn btn-outline-danger btn-sm" type="submit">发起删除申请</button>
-          </form>
+          <form method="post" action="{{ url_for('main.projects_delete_request', project_id=project.id) }}" onsubmit="return confirm('确认发起删除申请？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" type="submit">发起删除申请</button></form>
         {% endif %}
-
         {% if delete_req %}
           {% set member_id_list = members|map(attribute='id')|list %}
           {% if current_user.id in approved_user_ids %}
             <span class="text-muted small align-self-center">你已同意删除</span>
           {% elif current_user.id in member_id_list or is_admin %}
-            <form method="post" action="{{ url_for('main.projects_delete_approve', project_id=project.id) }}"
-                  onsubmit="return confirm('确认同意删除该项目？须「全体项目信息同意」或「至少一名管理员同意」后，由管理员执行删除。');">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-outline-danger btn-sm" type="submit">我同意删除</button>
-            </form>
+            <form method="post" action="{{ url_for('main.projects_delete_approve', project_id=project.id) }}" onsubmit="return confirm('确认同意删除？');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" type="submit">我同意删除</button></form>
           {% endif %}
-
           {% if is_admin and delete_can_execute %}
-            <form method="post" action="{{ url_for('main.projects_delete_execute', project_id=project.id) }}"
-                  onsubmit="return confirm('确认立即删除该项目（包含流水/凭证/追加记录）？此操作不可恢复。');">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-danger btn-sm" type="submit">执行删除</button>
-            </form>
+            <form method="post" action="{{ url_for('main.projects_delete_execute', project_id=project.id) }}" onsubmit="return confirm('确认删除？');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-danger btn-sm" type="submit">执行删除</button></form>
           {% endif %}
         {% endif %}
       </div>
     </div>
   </div>
 
-
-  {% if project.sub_projects %}
-    <div class="card mb-4">
-      <div class="card-body">
-        <div class="fw-semibold mb-2">📂 子项目树（{{ all_sub_projects|length + project.sub_projects|length }} 个）</div>
-        <div class="list-group list-group-flush">
-          {% for sub in project.sub_projects %}
-            <div class="list-group-item px-0 d-flex align-items-center gap-2">
-              <span class="text-muted" style="width:18px;">├</span>
-              <a href="{{ url_for('main.project_detail', project_id=sub.id) }}" class="fw-semibold text-decoration-none flex-grow-1">{{ sub.name }}</a>
-              {% if not sub.can_dividend %}<span class="badge text-bg-warning" style="font-size:.65rem;">不可分红</span>{% endif %}
-              {% if sub.sub_projects %}
-                <span class="badge text-bg-light text-muted" style="font-size:.65rem;">{{ sub.sub_projects|length }} 个子项目</span>
-              {% endif %}
-              <a href="{{ url_for('main.project_detail', project_id=sub.id) }}" class="btn btn-sm btn-outline-secondary">查看</a>
-            </div>
-            {% for sub2 in sub.sub_projects %}
-              <div class="list-group-item px-0 d-flex align-items-center gap-2 ps-3" style="padding-left:36px !important;">
-                <span class="text-muted" style="width:18px;">└</span>
-                <a href="{{ url_for('main.project_detail', project_id=sub2.id) }}" class="text-decoration-none flex-grow-1">{{ sub2.name }}</a>
-                {% if not sub2.can_dividend %}<span class="badge text-bg-warning" style="font-size:.65rem;">不可分红</span>{% endif %}
-                <a href="{{ url_for('main.project_detail', project_id=sub2.id) }}" class="btn btn-sm btn-outline-secondary">查看</a>
-              </div>
-              {% for sub3 in sub2.sub_projects %}
-                <div class="list-group-item px-0 d-flex align-items-center gap-2 ps-5" style="padding-left:54px !important;">
-                  <a href="{{ url_for('main.project_detail', project_id=sub3.id) }}" class="text-decoration-none flex-grow-1">└ {{ sub3.name }}</a>
-                  {% if not sub3.can_dividend %}<span class="badge text-bg-warning" style="font-size:.65rem;">不可分红</span>{% endif %}
-                  <a href="{{ url_for('main.project_detail', project_id=sub3.id) }}" class="btn btn-sm btn-outline-secondary">查看</a>
-                </div>
-              {% endfor %}
-            {% endfor %}
-          {% endfor %}
-        </div>
-      </div>
+  <!-- 修改结束日期模态框 -->
+  <div class="modal fade" id="endDateModal" tabindex="-1"><div class="modal-dialog modal-sm modal-dialog-centered"><div class="modal-content">
+  {% if end_change_req %}
+    <div class="modal-header"><div class="modal-title small fw-semibold">修改结束日期</div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body small">
+      <div class="alert alert-warning py-2 mb-2">审批中：<strong>{{ end_change_req.old_end_date }}</strong> → <strong>{{ end_change_req.new_end_date }}</strong></div>
+      <div class="small text-muted mb-2">同意：{{ end_change_req.approvals|length }} / {{ members|length }}</div>
+      {% set ec_ap = end_change_req.approvals|map(attribute='user_id')|list %}
+      {% if current_user.id in ec_ap %}<span class="badge text-bg-secondary">你已同意</span>
+      {% elif current_user.id in (members|map(attribute='id')|list) or is_admin %}
+        <form method="post" action="{{ url_for('main.project_end_date_change_approve', project_id=project.id) }}" class="d-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-primary" type="submit">同意</button></form>{% endif %}
+      {% if end_can_execute and (is_admin or current_user.id in (members|map(attribute='id')|list)) %}
+        <form method="post" action="{{ url_for('main.project_end_date_change_execute', project_id=project.id) }}" class="d-inline ms-1">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-success" type="submit">执行</button></form>{% endif %}
+      {% if is_admin or end_change_req.created_by_user_id == current_user.id %}
+        <form method="post" action="{{ url_for('main.project_end_date_change_cancel', project_id=project.id) }}" class="d-inline ms-1">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary" type="submit" onclick="return confirm('确认取消？')">取消</button></form>{% endif %}
     </div>
+  {% else %}
+    <form method="post" action="{{ url_for('main.project_end_date_change', project_id=project.id) }}">
+      <div class="modal-header"><div class="modal-title small fw-semibold">修改结束日期</div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">{{ end_change_form.hidden_tag() }}{{ end_change_form.new_end_date(class="form-control") }}</div>
+      <div class="modal-footer"><button class="btn btn-sm btn-primary" type="submit">提交申请</button></div>
+    </form>
   {% endif %}
+  </div></div></div>
+  <!-- /模态框 -->
 
-  <div class="card mb-4">
-    <div class="card-body">
-      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
-        <div>
-          <div class="text-muted small">负责人</div>
-          <div class="fs-5 fw-semibold">{{ leader.username if leader else '（未指定）' }}</div>
-          <div class="text-muted small mt-2">计划周期</div>
-          <div class="fw-semibold">{{ project.planned_start_date }} → {{ project.planned_end_date }}</div>
-          <div class="text-muted small">今天：{{ today }}
-            {% if days_left < 0 %}
-              · <span class="text-danger fw-bold">逾期 {{ overdue_days }} 天</span>
-            {% else %}
-              · 剩余天数：<span class="fw-semibold">{{ days_left }}</span>
-            {% endif %}
-          </div>
-        </div>
-        <div style="min-width: 260px; flex: 1;">
-          <div class="d-flex justify-content-between align-items-center mb-1">
-            <div class="text-muted small">时间进度</div>
-            <div class="small text-muted">{{ days_elapsed }} / {{ days_total }} 天</div>
-          </div>
-          <div class="progress" style="height: 5px; border-radius: 3px;">
-            <div class="progress-bar {% if days_left < 0 %}progress-bar-striped bg-danger{% endif %}" role="progressbar" style="width: {{ progress_pct }}%;" aria-valuenow="{{ progress_pct }}" aria-valuemin="0" aria-valuemax="100">
-              {{ progress_pct }}%
-            </div>
-          </div>
-          <div class="form-text mt-2">进度按“计划开始→计划结束”的自然日占用估算（用于概览，不做严格项目管理）。</div>
-        </div>
-      </div>
 
-      <hr class="my-4">
-
-      <div class="row g-4">
-        {% if project.status != 'ended' %}
-        <div class="col-lg-6">
-          <div class="fw-semibold mb-2">修改计划结束日期（须成员全员或管理员同意）</div>
-
-          {% if end_change_req %}
-            <div class="alert alert-warning py-2 small mb-2">
-              审批中：拟将结束日期从 <strong>{{ end_change_req.old_end_date }}</strong> 调整为 <strong>{{ end_change_req.new_end_date }}</strong>
-              <div class="mt-1">同意进度：{{ end_change_approved_ids|length }} / {{ members|length }}</div>
-            </div>
-
-            {% set member_ids = members|map(attribute='id')|list %}
-            {% if current_user.id in end_change_approved_ids %}
-              <span class="badge text-bg-secondary">你已同意</span>
-            {% elif current_user.id in member_ids or is_admin %}
-              <form method="post" action="{{ url_for('main.project_end_date_change_approve', project_id=project.id) }}" class="d-inline">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-outline-primary" type="submit">同意变更</button>
-              </form>
-            {% endif %}
-
-            {% if is_admin and end_change_can_execute %}
-              <form method="post" action="{{ url_for('main.project_end_date_change_execute', project_id=project.id) }}" class="d-inline ms-1">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-success" type="submit">执行变更</button>
-              </form>
-            {% endif %}
-
-            {% if is_admin or end_change_req.created_by_user_id == current_user.id %}
-              <form method="post" action="{{ url_for('main.project_end_date_change_cancel', project_id=project.id) }}" class="d-inline ms-1"
-                    onsubmit="return confirm('确认取消结束日期变更申请？');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button>
-              </form>
-            {% endif %}
-          {% else %}
-            <form method="post" action="{{ url_for('main.project_end_date_change', project_id=project.id) }}">
-              {{ end_change_form.hidden_tag() }}
-              <div class="mb-2">
-                <label class="form-label">新的计划结束日期</label>
-                {{ end_change_form.new_end_date(class="form-control") }}
-              </div>
-              <button class="btn btn-sm btn-primary" type="submit">提交变更申请</button>
-            </form>
-          {% endif %}
-        </div>
-      {% endif %}
-
-        <div class="col-lg-6">
+        <div class="col-lg-12">
           <div class="fw-semibold mb-2">提交项目进展（图文）</div>
           {% if project.status != 'ended' %}
           <form method="post" action="{{ url_for('main.project_update_post', project_id=project.id) }}" enctype="multipart/form-data">
@@ -400,7 +318,7 @@
           <form method="post" action="{{ url_for('main.project_dividend_post', project_id=project.id) }}" class="row g-2 align-items-end">
             {{ dividend_form.hidden_tag() }}
             <div class="col-sm-6 col-md-4">
-              <label class="form-label small mb-0">分红对象（默认项目信息）</label>
+              <label class="form-label small mb-0">分红对象（默认项目成员）</label>
               {{ dividend_form.recipient_key(class="form-select form-select-sm") }}
             </div>
             <div class="col-sm-6 col-md-4">
