@@ -194,7 +194,7 @@
             <div class="text-muted small">时间进度</div>
             <div class="small text-muted">{{ days_elapsed }} / {{ days_total }} 天</div>
           </div>
-          <div class="progress" style="height: 14px;">
+          <div class="progress" style="height: 5px; border-radius: 3px;">
             <div class="progress-bar {% if days_left < 0 %}progress-bar-striped bg-danger{% endif %}" role="progressbar" style="width: {{ progress_pct }}%;" aria-valuenow="{{ progress_pct }}" aria-valuemin="0" aria-valuemax="100">
               {{ progress_pct }}%
             </div>
@@ -340,53 +340,59 @@
 
   <div class="card border border-primary shadow-sm mb-4">
     <div class="card-body">
-      <div class="row g-3">
-        <div class="col-md-4 text-center">
-          <div class="text-muted small">已收净额</div>
-          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format(received_net_cents/100) }}</div>
-          <div class="small text-muted">收入 − 介绍费</div>
-        </div>
-        <div class="col-md-4 text-center">
-          <div class="text-muted small">已付支出</div>
-          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format(paid_cents/100) }}</div>
-          <div class="small text-muted">不含分红支出</div>
-        </div>
-        <div class="col-md-4 text-center">
-          <div class="text-muted small">{% if project.can_dividend %}可分红{% else %}已实现盈利{% endif %}</div>
-          <div class="fs-3 fw-bold {% if dividend_base_cents <= 0 %}text-danger{% else %}text-success{% endif %}">
-            ¥ {{ '%.2f'|format(dividend_base_cents/100) }}
+      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div>
+          <div class="text-muted small">已实现盈利（我方已收净额 − 已付支出）</div>
+          <div class="display-6 fw-bold {% if profit_realized_cents < 0 %}text-danger{% else %}text-success{% endif %}">
+            ¥ {{ '%.2f'|format(profit_realized_cents/100) }}
           </div>
-          <div class="small text-muted">净额 − 支出</div>
+          <div class="small text-muted mt-1">
+            若合同金额全部收回（估）：盈利约 <span class="fw-semibold">¥ {{ '%.2f'|format(profit_if_fully_collected_cents/100) }}</span>
+            <span class="text-muted">（我方应收净额 − 已付支出）</span>
+          </div>
+        </div>
+        <div class="text-end" style="max-width: 320px;">
+          <div class="text-muted small">中介设置</div>
+          <div class="small">
+            {% if finance.is_net_from_broker %}
+              <span class="badge text-bg-info">中介先扣</span>
+            {% else %}
+              <span class="badge text-bg-secondary">我方另付</span>
+            {% endif %}
+            {% if finance.is_percent_mode %}
+              <span class="badge text-bg-light border">比例 {{ '%.2f'|format((project.referral_ratio or 0)*100) }}%</span>
+            {% else %}
+              <span class="badge text-bg-light border">固定 ¥ {{ '%.2f'|format((project.broker_fixed_fee_cents or 0)/100) }}</span>
+            {% endif %}
+          </div>
         </div>
       </div>
 
       <hr class="my-3">
 
-      <details class="small">
-        <summary class="text-muted" style="cursor: pointer;">中介设置 & 详情</summary>
-        <div class="mt-2 d-flex flex-wrap gap-2">
-          {% if finance.is_net_from_broker %}
-            <span class="badge text-bg-info">中介先扣</span>
-          {% else %}
-            <span class="badge text-bg-secondary">我方另付</span>
-          {% endif %}
-          {% if finance.is_percent_mode %}
-            <span class="badge text-bg-light border">比例 {{ '%.2f'|format((project.referral_ratio or 0)*100) }}%</span>
-          {% else %}
-            <span class="badge text-bg-light border">固定 ¥ {{ '%.2f'|format((project.broker_fixed_fee_cents or 0)/100) }}</span>
-          {% endif %}
+      {% if project.can_dividend %}
+      <div class="fw-semibold mb-2">可分红（按当前盈余口径）</div>
+      <div class="row g-3 align-items-stretch">
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100 bg-body-secondary">
+            <div class="text-muted small">可分红基数（当前总池）</div>
+            <div class="fs-4 fw-semibold">¥ {{ '%.2f'|format(dividend_base_cents/100) }}</div>
+            <div class="small text-muted">max(0, 我方已收净额 − 支出)，登记分红不可超过「剩余」</div>
+          </div>
         </div>
-        <div class="text-muted mt-1">
-          已实现盈利：¥ {{ '%.2f'|format(profit_realized_cents/100) }}
-          {% if profit_if_fully_collected_cents != profit_realized_cents %}
-          · 全部收回后预估：¥ {{ '%.2f'|format(profit_if_fully_collected_cents/100) }}
-          {% endif %}
-          · 已登记分红：¥ {{ '%.2f'|format(dividend_paid_total_cents/100) }}
-          · 剩余可分红：¥ {{ '%.2f'|format(dividend_remaining_cents/100) }}
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="text-muted small">累计已登记分红</div>
+            <div class="fs-4 fw-semibold">¥ {{ '%.2f'|format(dividend_paid_total_cents/100) }}</div>
+          </div>
         </div>
-      </details>
-    </div>
-  </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100 border-success">
+            <div class="text-muted small">剩余可分红</div>
+            <div class="fs-4 fw-bold text-success">¥ {{ '%.2f'|format(dividend_remaining_cents/100) }}</div>
+          </div>
+        </div>
+      </div>
 
       {% if is_admin and project.status != 'ended' %}
         <div class="mt-3 p-3 border rounded bg-light">
@@ -612,10 +618,7 @@
     </div>
   {% endif %}
 
-  <h2 class="h6">{% if is_parent %}全部流水（含子项目）{% else %}流水（该项目）{% endif %}</h2>
-  {% if is_parent %}
-    <div class="alert alert-light small py-1 mb-2">以下流水包含本项目及所有子项目的记录，已按时间排序。</div>
-  {% endif %}
+  <h2 class="h6">流水（该项目）</h2>
   <div class="text-muted small mb-2">结余列：按时间顺序累计<strong>已结算</strong>流水（收入 +、支出 −）后的项目账户余额；未结算不改变结余。</div>
   {% if tx_pagination.pages > 1 %}
     <div class="text-muted small mb-2">第 {{ tx_pagination.page }} / {{ tx_pagination.pages }} 页，共 {{ tx_pagination.total }} 条</div>
