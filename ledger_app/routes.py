@@ -571,16 +571,16 @@ def dashboard():
     # 可分配盈余：全部项目利润合计（不含分红支出）
     surplus_cents = sum(
         r["received_net_cents"] - max(
-            int(_db.session.query(_db.func.coalesce(_db.func.sum(Transaction.amount_cents), 0))
+            int(db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
                .filter(Transaction.project_id == r["project"].id, Transaction.type == "expense",
                        Transaction.settled.is_(True), Transaction.is_void.is_(False),
                        Transaction.status == "active")
                .scalar() or 0)
-            - int(_db.session.query(_db.func.coalesce(_db.func.sum(Transaction.amount_cents), 0))
+            - int(db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
                   .filter(Transaction.project_id == r["project"].id, Transaction.type == "expense",
                           Transaction.settled.is_(True), Transaction.is_void.is_(False),
                           Transaction.status == "active",
-                          _db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"))
+                          db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"))
                   .scalar() or 0), 0)
         for r in active_rows
     )
