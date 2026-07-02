@@ -89,6 +89,21 @@
             {% if project.status != 'ended' %}<button class="btn btn-sm btn-outline-secondary ms-1" data-bs-toggle="modal" data-bs-target="#endDateModal">修改日期</button>{% endif %}
           </div>
           <hr class="my-2">
+          <div class="small d-flex gap-3 mb-2">
+            <div>
+              <span class="text-muted">项目总净额</span>
+              <span class="fw-semibold">¥ {{ '%.2f'|format(expected_net_cents/100) }}</span>
+            </div>
+            <div>
+              <span class="text-muted">回款进度</span>
+              <span class="fw-semibold">{% set rpct = (received_cents / expected_total_cents * 100)|int if expected_total_cents > 0 else 0 %}¥ {{ '%.2f'|format(received_cents/100) }} / ¥ {{ '%.2f'|format(expected_total_cents/100) }}（{{ [rpct, 100]|min }}%）</span>
+            </div>
+            <div>
+              <span class="text-muted">中介费</span>
+              <span class="fw-semibold">¥ {{ '%.2f'|format(broker_estimated_cents/100) }}（已给） / ¥ {{ '%.2f'|format(broker_fee_expected_total_cents/100) }}（总共）</span>
+            </div>
+          </div>
+          <hr class="my-2">
           <div class="d-flex gap-3">
             <div>
               <div class="text-muted small">收入</div>
@@ -187,7 +202,9 @@
   </div></div></div>
   <!-- /模态框 -->
 
-  <div class="card mb-4">
+  <div class="row g-3 mb-4">
+    <div class="col-md-6">
+      <div class="card mb-4">
     <div class="card-header py-2" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#activityLogCollapse" aria-expanded="false" aria-controls="activityLogCollapse">
       <div class="d-flex justify-content-between align-items-center">
         <span class="fw-semibold">操作记录</span>
@@ -251,8 +268,12 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
 });
 </script>
 
-  {% if project_updates %}
-    <div class="card mb-4">
+    </div>
+
+    </div>
+    {% if project_updates %}
+    <div class="col-md-6">
+      <div class="card mb-4">
       <div class="card-body p-0">
         <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
           <span class="fw-semibold small">📁 进展日志</span>
@@ -273,14 +294,14 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
       </div>
     </div>
   {% endif %}
+    </div>
+  </div>
 
   <details class="mt-2"><summary class="small text-muted" style="cursor:pointer;">合同与回款详情</summary>
     <div class="row g-2 mt-2 small">
       <div class="col-md-4">合同全额：<span class="fw-semibold">¥ {{ '%.2f'|format(expected_total_cents/100) }}</span></div>
-      <div class="col-md-4">已回款：<span class="fw-semibold">¥ {{ '%.2f'|format(received_cents/100) }}</span></div>
       <div class="col-md-4">未回款：<span class="fw-semibold text-danger">¥ {{ '%.2f'|format(remaining_gross_cents/100) }}</span></div>
       <div class="col-md-4">我方净应收：<span class="fw-semibold">¥ {{ '%.2f'|format(expected_net_cents/100) }}</span></div>
-      <div class="col-md-4">我方已收净：<span class="fw-semibold">¥ {{ '%.2f'|format(received_net_cents/100) }}</span></div>
       <div class="col-md-4">我方未收净：<span class="fw-semibold text-danger">¥ {{ '%.2f'|format(remaining_net_cents/100) }}</span></div>
     </div>
   </details>
