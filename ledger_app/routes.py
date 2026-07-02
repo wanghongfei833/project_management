@@ -1893,11 +1893,6 @@ def project_logs_new(project_id: int):
         db.session.add(u)
         db.session.flush()
         n_att = _save_project_update_attachments(u)
-        _log_project_activity(
-            int(p.id), "project.update_note",
-            f"提交日志：{(form.title.data or '无标题')[:80]}",
-            detail=f"log_id={u.id}, attachments={n_att}",
-        )
         db.session.commit()
         return redirect(url_for("main.project_logs", project_id=p.id, log_id=u.id))
 
@@ -1932,13 +1927,6 @@ def project_update_post(project_id: int):
     db.session.add(u)
     db.session.flush()
     n_att = _save_project_update_attachments(u)
-    body_text = (u.body or "").strip()
-    preview = body_text.replace("\n", " ")[:80]
-    _log_project_activity(
-        int(p.id),
-        "project.update_note",
-        f"提交进展记录（进展 id={u.id}，附件 {n_att} 个）：{preview}{'…' if len(body_text) > 80 else ''}",
-    )
     db.session.commit()
     flash("进展已提交", "success")
     return redirect(url_for("main.project_progress", project_id=p.id))
