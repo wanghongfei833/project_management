@@ -198,16 +198,16 @@
       <div class="card-body">
         <p class="small text-muted mb-2">系统自动记录关键操作（审批、删除、配置变更等）。</p>
         <div class="mb-2 d-flex flex-wrap gap-1" id="log-filter-bar">
-          <span class="badge text-bg-primary log-filter active" data-filter="all" style="cursor:pointer;">全部</span>
-          <span class="badge text-bg-light border log-filter" data-filter="project" style="cursor:pointer;">📁 项目</span>
-          <span class="badge text-bg-light border log-filter" data-filter="transaction" style="cursor:pointer;">💳 流水</span>
-          <span class="badge text-bg-light border log-filter" data-filter="dividend" style="cursor:pointer;">💰 分红</span>
-          <span class="badge text-bg-light border log-filter" data-filter="other" style="cursor:pointer;">🔧 其他</span>
+          <span class="badge text-bg-primary log-filter active" data-filter="all" style="cursor:pointer;">📋 全部日志</span>
+          <span class="badge text-bg-light border log-filter" data-filter="project" style="cursor:pointer;">📁 项目日志</span>
+          <span class="badge text-bg-light border log-filter" data-filter="note" style="cursor:pointer;">📁 进展日志</span>
+          <span class="badge text-bg-light border log-filter" data-filter="finance" style="cursor:pointer;">💳 财政日志</span>
+          <span class="badge text-bg-light border log-filter" data-filter="other" style="cursor:pointer;">🔧 其他日志</span>
         </div>
         <ul class="list-unstyled mb-0 small">
           {% for log in activity_logs %}
             {% set log_type = log.action.split('.')[0] %}
-            <li class="border-bottom py-2 log-item" data-log-type="{{ log_type }}">
+            <li class="border-bottom py-2 log-item" data-log-type="{{ log_type }}" data-log-action="{{ log.action }}">
               <div class="d-flex justify-content-between">
                 <div class="text-muted">
                   {{ log.created_at.strftime('%m-%d %H:%M') }}
@@ -234,20 +234,19 @@
 document.querySelectorAll('.log-filter').forEach(function(el) {
   el.addEventListener('click', function() {
     document.querySelectorAll('.log-filter').forEach(function(b) {
-      b.className = b.className.replace(' text-bg-primary', ' text-bg-light border').replace(' active', '');
+      b.className = b.className.replace(' text-bg-primary', ' text-bg-light border');
     });
-    this.className = this.className.replace(' text-bg-light border', '').replace(' border', '');
-    this.className += ' text-bg-primary active';
+    this.className = this.className.replace(' text-bg-light border', '') + ' text-bg-primary';
     var filter = this.dataset.filter;
     document.querySelectorAll('.log-item').forEach(function(item) {
+      var action = item.dataset.logType;
       if (filter === 'all') { item.style.display = ''; return; }
-      var type = item.dataset.logType;
-      var show = (filter === 'dividend' && type === 'dividend') ||
-                 (filter === 'transaction' && ['transaction','dividend'].indexOf(type) === -1) ||
-                 (filter === 'project' && type === 'project') ||
-                 (filter === 'other' && ['project','dividend'].indexOf(type) === -1 && ['transaction','dividend'].indexOf(type) === -1);
-      // Simplified: just match prefix
-      item.style.display = type === filter || type.startsWith(filter) || filter === 'all' ? '' : 'none';
+      var show = false;
+      if (filter === 'project') show = action === 'project' && item.dataset.logAction !== 'project.update_note';
+      else if (filter === 'note') show = item.dataset.logAction === 'project.update_note';
+      else if (filter === 'finance') show = action === 'transaction' || action === 'dividend';
+      else if (filter === 'other') show = action !== 'project' && action !== 'transaction' && action !== 'dividend';
+      item.style.display = show ? '' : 'none';
     });
   });
 });
