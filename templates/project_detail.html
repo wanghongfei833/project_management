@@ -187,11 +187,6 @@
   </div></div></div>
   <!-- /模态框 -->
 
-
-        <div class="col-lg-12">
-          <span class="text-muted">📋 项目日志 · {{ project_updates|length }} 条</span>
-        </div>
-
   <div class="card mb-4">
     <div class="card-header py-2" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#activityLogCollapse" aria-expanded="false" aria-controls="activityLogCollapse">
       <div class="d-flex justify-content-between align-items-center">
@@ -201,10 +196,18 @@
     </div>
     <div id="activityLogCollapse" class="collapse">
       <div class="card-body">
-        <p class="small text-muted mb-3">系统自动记录关键操作（审批、删除、配置变更等）。</p>
+        <p class="small text-muted mb-2">系统自动记录关键操作（审批、删除、配置变更等）。</p>
+        <div class="mb-2 d-flex flex-wrap gap-1" id="log-filter-bar">
+          <span class="badge text-bg-primary log-filter active" data-filter="all" style="cursor:pointer;">全部</span>
+          <span class="badge text-bg-light border log-filter" data-filter="project" style="cursor:pointer;">📁 项目</span>
+          <span class="badge text-bg-light border log-filter" data-filter="transaction" style="cursor:pointer;">💳 流水</span>
+          <span class="badge text-bg-light border log-filter" data-filter="dividend" style="cursor:pointer;">💰 分红</span>
+          <span class="badge text-bg-light border log-filter" data-filter="other" style="cursor:pointer;">🔧 其他</span>
+        </div>
         <ul class="list-unstyled mb-0 small">
           {% for log in activity_logs %}
-            <li class="border-bottom py-2">
+            {% set log_type = log.action.split('.')[0] %}
+            <li class="border-bottom py-2 log-item" data-log-type="{{ log_type }}">
               <div class="d-flex justify-content-between">
                 <div class="text-muted">
                   {{ log.created_at.strftime('%m-%d %H:%M') }}
@@ -226,6 +229,29 @@
       </div>
     </div>
   </div>
+
+<script>
+document.querySelectorAll('.log-filter').forEach(function(el) {
+  el.addEventListener('click', function() {
+    document.querySelectorAll('.log-filter').forEach(function(b) {
+      b.className = b.className.replace(' text-bg-primary', ' text-bg-light border').replace(' active', '');
+    });
+    this.className = this.className.replace(' text-bg-light border', '').replace(' border', '');
+    this.className += ' text-bg-primary active';
+    var filter = this.dataset.filter;
+    document.querySelectorAll('.log-item').forEach(function(item) {
+      if (filter === 'all') { item.style.display = ''; return; }
+      var type = item.dataset.logType;
+      var show = (filter === 'dividend' && type === 'dividend') ||
+                 (filter === 'transaction' && ['transaction','dividend'].indexOf(type) === -1) ||
+                 (filter === 'project' && type === 'project') ||
+                 (filter === 'other' && ['project','dividend'].indexOf(type) === -1 && ['transaction','dividend'].indexOf(type) === -1);
+      // Simplified: just match prefix
+      item.style.display = type === filter || type.startsWith(filter) || filter === 'all' ? '' : 'none';
+    });
+  });
+});
+</script>
 
   {% if project_updates %}
     <div class="card mb-4">
