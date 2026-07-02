@@ -189,8 +189,8 @@
 
 
         <div class="col-lg-12">
-          <a href="{{ url_for('main.project_progress', project_id=project.id) }}" class="btn btn-outline-primary btn-sm">
-            📝 项目进展
+          <a href="{{ url_for('main.project_logs', project_id=project.id) }}" class="btn btn-outline-primary btn-sm">
+            📋 项目日志
           </a>
           <span class="text-muted small ms-2">{{ project_updates|length }} 条记录</span>
         </div>
@@ -235,32 +235,9 @@
 
   {% if project_updates %}
     <div class="card mb-4">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <div class="fw-semibold">进展记录</div>
-          <a href="{{ url_for('main.project_progress', project_id=project.id) }}" class="btn btn-sm btn-outline-primary">查看全部</a>
-        </div>
-        {% for u in project_updates[:5] %}
-          <div class="border-bottom py-2">
-            <div class="d-flex align-items-center gap-2 mb-1">
-              <span class="badge rounded-pill text-bg-light" style="font-size:.65rem;">{{ u.created_at.strftime('%m-%d %H:%M') if u.created_at else '' }}</span>
-              <span class="small fw-semibold">{{ u.author.username if u.author else '?' }}</span>
-            </div>
-            <div class="small fw-medium">{{ u.title or '（无标题）' }}</div>
-            <div class="small text-muted" style="white-space:pre-wrap;">{{ u.body[:100] }}{% if u.body|length > 100 %}…{% endif %}</div>
-            {% if u.attachments %}
-              <div class="d-flex flex-wrap gap-1 mt-1">
-                {% for a in u.attachments[:3] %}
-                  {% if a.filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.gif')) %}
-                    <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" alt="" style="height:40px;border-radius:4px;">
-                  {% else %}
-                    <span class="badge text-bg-light border" style="font-size:.65rem;">📎</span>
-                  {% endif %}
-                {% endfor %}
-              </div>
-            {% endif %}
-          </div>
-        {% endfor %}
+      <div class="card-body py-2 d-flex justify-content-between align-items-center">
+        <span class="fw-semibold small">📋 进展记录 · {{ project_updates|length }} 条</span>
+        <a href="{{ url_for('main.project_logs', project_id=project.id) }}" class="btn btn-sm btn-outline-primary">查看日志</a>
       </div>
     </div>
   {% endif %}

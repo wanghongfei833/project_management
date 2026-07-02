@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · 日志{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <h1 class="h4 mb-1">{{ project.name }}</h1>
+      <div class="text-muted small">
+        {% if all_logs|length > 0 %}{{ all_logs|length }} 条日志 · {% endif %}
+        <a href="{{ url_for('main.project_detail', project_id=project.id) }}">返回项目</a>
+      </div>
+    </div>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('main.project_logs_new', project_id=project.id) }}">+ 新增日志</a>
+  </div>
+
+  <div class="row g-0 border rounded" style="min-height: 500px;">
+    {# 左侧目录 #}
+    <div class="col-md-4 border-end" style="overflow-y: auto; max-height: 600px;">
+      <div class="list-group list-group-flush">
+        {% for l in all_logs %}
+          <a href="{{ url_for('main.project_logs', project_id=project.id, log_id=l.id) }}"
+             class="list-group-item list-group-item-action py-2 px-3 {% if current_log and current_log.id == l.id %}active{% endif %}">
+            <div class="small fw-semibold">{{ l.title or '（无标题）' }}</div>
+            <div class="small" style="font-size:.75rem;">
+              {{ l.created_at.strftime('%m-%d %H:%M') if l.created_at else '' }} · {{ l.author.username if l.author else '?' }}
+            </div>
+          </a>
+        {% else %}
+          <div class="list-group-item text-muted text-center py-5">暂无日志</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    {# 右侧详情 #}
+    <div class="col-md-8">
+      {% if current_log %}
+        <div class="p-4">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="badge rounded-pill text-bg-light">{{ current_log.created_at.strftime('%Y-%m-%d %H:%M') if current_log.created_at else '' }}</span>
+            <span class="fw-semibold">{{ current_log.author.username if current_log.author else '?' }}</span>
+          </div>
+          <div class="fs-5 fw-bold mb-3">{{ current_log.title or '（无标题）' }}</div>
+          <div class="mb-3" style="white-space: pre-wrap; line-height: 1.7;">{{ current_log.body }}</div>
+          {% if current_log.attachments %}
+            <div class="d-flex flex-wrap gap-2">
+              {% for a in current_log.attachments %}
+                {% if a.filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.gif')) %}
+                  <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank" class="d-block border rounded p-1">
+                    <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" alt="{{ a.filename }}" style="max-height:200px;border-radius:4px;">
+                  </a>
+                {% else %}
+                  <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank" class="btn btn-sm btn-outline-secondary">📎 {{ a.filename }}</a>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="d-flex align-items-center justify-content-center h-100 text-muted" style="min-height:400px;">
+          <div class="text-center">
+            <div class="mb-2" style="font-size:2rem;">📋</div>
+            <div>选择左侧日志查看详情</div>
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

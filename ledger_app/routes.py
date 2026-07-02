@@ -1835,6 +1835,12 @@ def project_revive_cancel(project_id: int):
 @bp.route("/projects/<int:project_id>/progress", methods=["GET"])
 @login_required
 def project_progress(project_id: int):
+    return redirect(url_for("main.project_logs", project_id=project_id))
+
+
+@bp.route("/projects/<int:project_id>/logs", methods=["GET"])
+@login_required
+def project_logs(project_id: int):
     p = db.session.get(Project, project_id)
     if not p:
         flash("项目不存在", "warning")
@@ -1843,18 +1849,59 @@ def project_progress(project_id: int):
         flash("无权查看", "danger")
         return redirect(url_for("main.projects_list"))
 
-    page = request.args.get("page", 1, type=int) or 1
-    page = max(page, 1)
-    pagination = (
-        ProjectUpdate.query.options(joinedload(ProjectUpdate.attachments), joinedload(ProjectUpdate.author))
+    log_id = request.args.get("log_id", type=int)
+    all_logs = (
+        ProjectUpdate.query.options(joinedload(ProjectUpdate.author))
         .filter_by(project_id=p.id)
         .order_by(ProjectUpdate.created_at.desc())
-        .paginate(page=page, per_page=15, error_out=False)
+        .all()
     )
-    can_post = p.status != "ended" and _is_project_member(p.id, current_user.id)
-    return render_template("project_progress.html",
-                          project=p, updates=pagination, can_post=can_post,
-                          form=ProjectUpdateForm(), is_admin=is_admin())
+    current_log = None
+    if log_id:
+        current_log = next((l for l in all_logs if l.id == log_id), None)
+    elif all_logs:
+        current_log = all_logs[0]
+    if current_log:
+        # Eager load attachments for the selected log
+        current_log = ProjectUpdate.query.options(
+            joinedload(ProjectUpdate.author), joinedload(ProjectUpdate.attachments)
+        ).filter_by(id=current_log.id).first()
+
+    return render_template("project_logs.html",
+                          project=p, all_logs=all_logs, current_log=current_log, is_admin=is_admin())
+
+
+@bp.route("/projects/<int:project_id>/logs/new", methods=["GET", "POST"])
+@login_required
+def project_logs_new(project_id: int):
+    p = db.session.get(Project, project_id)
+    if not p:
+        flash("项目不存在", "warning")
+        return redirect(url_for("main.projects_list"))
+    if not _is_project_member(p.id, current_user.id):
+        flash("你不是该项目成员", "danger")
+        return redirect(url_for("main.projects_list"))
+
+    form = ProjectUpdateForm()
+    if form.validate_on_submit():
+        u = ProjectUpdate(
+            project_id=p.id,
+            title=form.title.data or None,
+            body=form.body.data,
+            created_by_user_id=current_user.id,
+        )
+        db.session.add(u)
+        db.session.flush()
+        n_att = _save_project_update_attachments(u)
+        _log_project_activity(
+            int(p.id), "project.update_note",
+            f"提交日志：{(form.title.data or '无标题')[:80]}",
+            detail=f"log_id={u.id}, attachments={n_att}",
+        )
+        db.session.commit()
+        return redirect(url_for("main.project_logs", project_id=p.id, log_id=u.id))
+
+    return render_template("project_logs_new.html", project=p, form=form, is_admin=is_admin())
 
 
 @bp.route("/projects/<int:project_id>/updates", methods=["POST"])
