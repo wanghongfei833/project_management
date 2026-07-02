@@ -34,9 +34,10 @@
     <div class="col-md-3">
       <div class="card stat-card stat-card-net">
         <div class="card-body">
-          <i class="bi bi-wallet2 stat-icon"></i>
-          <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing: 0.5px;">净额</div>
-          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format(net_cents/100) }}</div>
+          <i class="bi bi-cash-stack stat-icon"></i>
+          <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing: 0.5px;">可分配盈余</div>
+          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format((surplus_cents or 0)/100) }}</div>
+          <div class="small text-muted mt-1">全部项目利润（不含分红支出）</div>
         </div>
       </div>
     </div>

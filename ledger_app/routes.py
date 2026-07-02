@@ -568,11 +568,29 @@ def dashboard():
     start = (list_page - 1) * list_per_page
     active_rows_page = active_rows[start : start + list_per_page]
 
+    # 可分配盈余：全部项目利润合计（不含分红支出）
+    surplus_cents = sum(
+        r["received_net_cents"] - max(
+            int(_db.session.query(_db.func.coalesce(_db.func.sum(Transaction.amount_cents), 0))
+               .filter(Transaction.project_id == r["project"].id, Transaction.type == "expense",
+                       Transaction.settled.is_(True), Transaction.is_void.is_(False),
+                       Transaction.status == "active")
+               .scalar() or 0)
+            - int(_db.session.query(_db.func.coalesce(_db.func.sum(Transaction.amount_cents), 0))
+                  .filter(Transaction.project_id == r["project"].id, Transaction.type == "expense",
+                          Transaction.settled.is_(True), Transaction.is_void.is_(False),
+                          Transaction.status == "active",
+                          _db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"))
+                  .scalar() or 0), 0)
+        for r in active_rows
+    )
+
     return render_template(
         "dashboard.html",
         income_cents=int(income_cents),
         expense_cents=int(expense_cents),
         net_cents=int(income_cents) - int(expense_cents),
+        surplus_cents=int(surplus_cents),
         project_rows=active_rows_page,
         list_page=list_page,
         list_pages=list_pages,
@@ -2649,6 +2667,7 @@ def project_detail(project_id: int):
         leader=leader,
         today=today,
         all_sub_projects=all_sub_projects,
+        is_parent=is_parent,
         days_total=int(days_total),
         days_elapsed=int(days_elapsed),
         days_left=int(days_left),
