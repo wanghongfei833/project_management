@@ -387,7 +387,7 @@ class ProjectUpdate(db.Model):
 
     project = db.relationship("Project", back_populates="updates")
     attachments = db.relationship("ProjectUpdateAttachment", back_populates="update")
-    author = db.relationship("User")
+    author = db.relationship("User", foreign_keys=[created_by_user_id])
 
 
 class ProjectUpdateAttachment(db.Model):
