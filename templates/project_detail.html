@@ -189,9 +189,7 @@
 
 
         <div class="col-lg-12">
-          <a href="{{ url_for('main.project_logs', project_id=project.id) }}" class="btn btn-outline-primary btn-sm">
-            📋 项目日志 · {{ project_updates|length }} 条
-          </a>
+          <span class="text-muted">📋 项目日志 · {{ project_updates|length }} 条</span>
         </div>
 
   <div class="card mb-4">
