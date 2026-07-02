@@ -240,7 +240,10 @@ def project_expected_total_cents(project_id: int) -> int:
         db.session.query(
             db.func.coalesce(db.func.sum(ProjectExpectedIncomeAdjustment.amount_cents), 0)
         )
-        .filter(ProjectExpectedIncomeAdjustment.project_id == project_id)
+        .filter(
+            ProjectExpectedIncomeAdjustment.project_id == project_id,
+            ProjectExpectedIncomeAdjustment.status.in_(["active", "executed"]),
+        )
         .scalar()
         or 0
     )
@@ -486,7 +489,7 @@ def dashboard():
                 )
                 .scalar() or 0
             )
-            paid_excl_div = paid_cents_all
+            paid_excl_div = max(paid_cents_all - div_expense, 0)
             div_base = max(int(fin["received_net_cents"]) - paid_excl_div, 0)
             div_paid = int(
                 db.session.query(db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0))
@@ -2518,18 +2521,17 @@ def project_detail(project_id: int):
     else:
         expected_total_cents = int(project_expected_total_cents(p.id))
         finance = build_project_finance(
-        p,
-        expected_total_cents=expected_total_cents,
-        received_settled_income_bank_cents=int(received_cents),
-    )
+            p,
+            expected_total_cents=expected_total_cents,
+            received_settled_income_bank_cents=int(received_cents),
+        )
+        balance_after_by_tx_id = running_settled_cash_balance_by_transaction_id(p.id)
     expected_net_cents = finance["expected_net_cents"]
     received_net_cents = finance["received_net_cents"]
     remaining_gross_cents = finance["remaining_gross_cents"]
     remaining_net_cents = finance["remaining_net_cents"]
     broker_fee_expected_total_cents = finance["broker_fee_expected_total_cents"]
     broker_estimated_cents = finance["broker_estimated_on_received_cents"]
-
-    balance_after_by_tx_id = running_settled_cash_balance_by_transaction_id(p.id)
 
     profit_realized_cents = int(received_net_cents) - int(paid_cents)
     profit_if_fully_collected_cents = int(expected_net_cents) - int(paid_cents)
@@ -2939,7 +2941,7 @@ def transactions_edit(transaction_id: int):
             new_occur_date=form.occur_date.data,
             new_settled=bool(form.settled.data),
             new_counterparty=form.counterparty.data or None,
-            new_recipient_user_id=form.recipient_user_id.data if form.counterparty.data == '项目人员' else None,
+            new_recipient_user_id=form.recipient_user_id.data if form.counterparty.data == CP_EXPENSE_MEMBER else None,
             new_note=raw_note,
             created_by_user_id=current_user.id,
         )
@@ -3046,6 +3048,7 @@ def transactions_edit_approve(transaction_id: int):
         tx.occur_date = req.new_occur_date
         tx.settled = bool(req.new_settled)
         tx.counterparty = req.new_counterparty
+        tx.recipient_user_id = req.new_recipient_user_id
         tx.note = req.new_note
         req.status = "executed"
         req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
