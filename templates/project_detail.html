@@ -89,9 +89,21 @@
             {% if project.status != 'ended' %}<button class="btn btn-sm btn-outline-secondary ms-1" data-bs-toggle="modal" data-bs-target="#endDateModal">修改日期</button>{% endif %}
           </div>
           <hr class="my-2">
-          <div class="text-muted small">已实现盈利</div>
-          <div class="fw-bold {% if profit_realized_cents < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.2rem;">
-            ¥ {{ '%.2f'|format(profit_realized_cents/100) }}
+          <div class="d-flex gap-3">
+            <div>
+              <div class="text-muted small">收入</div>
+              <div class="fw-semibold text-success" style="font-size:1.1rem;">¥ {{ '%.2f'|format(received_cents/100) }}</div>
+            </div>
+            <div>
+              <div class="text-muted small">支出</div>
+              <div class="fw-semibold text-danger" style="font-size:1.1rem;">¥ {{ '%.2f'|format(paid_cents/100) }}</div>
+            </div>
+            <div>
+              <div class="text-muted small">已实现盈利</div>
+              <div class="fw-bold {% if profit_realized_cents < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.1rem;">
+                ¥ {{ '%.2f'|format(profit_realized_cents/100) }}
+              </div>
+            </div>
           </div>
         </div>
       </div>
