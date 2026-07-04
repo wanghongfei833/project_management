@@ -796,9 +796,6 @@ def projects_new():
         fixed_cents = yuan_to_cents(fixed_yuan) if fixed_yuan > 0 else 0
         if mode == BROKER_MODE_PERCENT:
             fixed_cents = 0
-        if mode == BROKER_MODE_FIXED and direction == BROKER_DIR_WE_PAY and fixed_cents <= 0:
-            flash("在「固定金额」且「我方另付介绍费」模式下，请填写大于 0 的中介固定费用。", "warning")
-            return render_template("project_form.html", form=form, is_admin=is_admin(), parent_candidates=parent_candidates, admin_user_ids=admin_user_ids, parent_member_ids=parent_member_ids)
         if (
             mode == BROKER_MODE_PERCENT
             and direction == BROKER_DIR_NET_FROM_BROKER
@@ -961,18 +958,6 @@ def projects_edit(project_id: int):
             flash(f"项目名称「{name}」已存在，请换一个名称", "warning")
             return render_template("project_form.html", form=form, is_admin=is_admin(), mode="edit", project=p,
                                    parent_candidates=parent_candidates, admin_user_ids=admin_user_ids, parent_member_ids=parent_member_ids)
-        if mode == BROKER_MODE_FIXED and direction == BROKER_DIR_WE_PAY and fixed_cents <= 0:
-            flash("在「固定金额」且「我方另付介绍费」模式下，请填写大于 0 的中介固定费用。", "warning")
-            return render_template(
-                "project_form.html",
-                form=form,
-                is_admin=is_admin(),
-                mode="edit",
-                project=p,
-                parent_candidates=parent_candidates,
-                admin_user_ids=admin_user_ids,
-                parent_member_ids=parent_member_ids,
-            )
         if (
             mode == BROKER_MODE_PERCENT
             and direction == BROKER_DIR_NET_FROM_BROKER
@@ -2540,6 +2525,9 @@ def project_detail(project_id: int):
         .order_by(User.username.asc())
         .all()
     )
+    # 项目人员显示：过滤掉非负责人的管理员（admin不参与实际工作）
+    leader_id = int(p.leader_user_id or 0)
+    display_members = [u for u in members if u.role != Role.ADMIN.value or u.id == leader_id]
     delete_req = (
         ProjectDeleteRequest.query.filter_by(project_id=p.id, status="open")
         .order_by(ProjectDeleteRequest.id.desc())
@@ -2611,6 +2599,23 @@ def project_detail(project_id: int):
     remaining_net_cents = finance["remaining_net_cents"]
     broker_fee_expected_total_cents = finance["broker_fee_expected_total_cents"]
     broker_estimated_cents = finance["broker_estimated_on_received_cents"]
+
+    # 实际已支付的中介费（通过支出流水记录）
+    broker_actual_expense_cents = int(
+        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+        .filter(
+            query_pid_filter,
+            Transaction.type == TransactionType.EXPENSE.value,
+            Transaction.counterparty == CP_EXPENSE_BROKER,
+            Transaction.settled.is_(True),
+            Transaction.is_void.is_(False),
+            Transaction.status == "active",
+        )
+        .scalar()
+        or 0
+    )
+    # 已给中介费 = 实际已支付的中介费支出流水（无记录则为0，不拿估算值冒充）
+    broker_paid_cents = broker_actual_expense_cents
 
     profit_realized_cents = int(received_net_cents) - int(paid_cents)
     profit_if_fully_collected_cents = int(expected_net_cents) - int(paid_cents)
@@ -2761,6 +2766,7 @@ def project_detail(project_id: int):
         user_name_map=user_name_map,
         adjustments=adjustments,
         members=members,
+        display_members=display_members,
         delete_req=delete_req,
         approved_user_ids=approved_user_ids,
         delete_ready=delete_ready,
@@ -2774,6 +2780,7 @@ def project_detail(project_id: int):
         remaining_net_cents=int(remaining_net_cents),
         broker_fee_expected_total_cents=int(broker_fee_expected_total_cents),
         broker_estimated_cents=int(broker_estimated_cents),
+        broker_paid_cents=int(broker_paid_cents),
         finance=finance,
         balance_after_by_tx_id=balance_after_by_tx_id,
         profit_realized_cents=int(profit_realized_cents),

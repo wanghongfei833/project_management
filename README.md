@@ -11,29 +11,41 @@
 - 未回款 Top10 图表
 - 按日期范围筛选的流水报表 + 支出对方 Pie 图
 
-### 📁 项目管理
-- 项目创建、编辑、成员管理（支持多成员）
-- 项目状态流转：**开放中 → 已终止 → 分红结算**
-- 计划周期与时间进度跟踪（逾期自动标红）
-- 项目进展记录（支持图文附件）
-- 操作审计日志（自动记录关键操作）
+### 📁 项目详情页
+- **财务摘要卡片**：应收（含介绍费）、介绍费、未收到费用 → 收入、支出、收支差额、净利润
+  - 每个指标独立圆角卡片，白色底 + 细边框，视觉清晰
+  - 净利润公式：`收入 - 支出 - 未付介绍费`（已付的中介费支出不再重复扣）
+  - 收支差额和净利润支持红绿颜色区分正负
+- **项目人员**：非负责人的管理员自动隐藏，负责人固定显示，其他人员列表可滚动
+- **终止/删除操作**：按钮整合到标题栏，紧挨"编辑项目"旁
+- **操作记录**：蓝色渐变头部 + 可折叠，筛选标签（全部/项目/财政/其他），最多显示 10 条
+- **进展日志**：始终可见，+ 新增 + 查看全部按钮，最多 10 条可滚动
 
 ### 💰 流水记账
 - 收入/支出流水登记（金额精确到分）
 - **审批工作流**：新增/修改/删除流水均需审核通过
   - 规则：**全体非管理员成员同意** 或 **管理员同意** 即自动执行
   - 管理员拥有绝对权力，操作即时生效
+- 支出对方可选「中介费」类别，自动计入中介费已付金额
 - 每笔流水支持多个凭证附件
 - 流水分页查看 + 逐笔账户余额
 
 ### 🧮 中介费拆账
-支持两种中介费用模式：
+支持两种中介费用模式（允许中介费为 ¥0）：
 - **百分比模式**：按合同金额比例计提
 - **固定金额模式**：全额扣除固定介绍费（不分摊）
 
 两种资金流向：
 - **我方另付**：流水记客户全额，介绍费从我方净额扣除
 - **中介先扣**：流水记我方净额（介绍费已由中介扣留）
+
+### 🎨 界面设计
+- Bootswatch Lux 主题 + 自定义卡片样式
+- 圆角卡片 + 柔和阴影 + 细边框分隔
+- 财务数字独立白色卡片展示
+- 蓝色区域使用 slate 渐变配色 `#5b7fa5 → #4a6d8c`
+- 项目信息卡浅灰底色，区别于操作区域
+- 大屏左右两栏，小屏自适应纵向堆叠
 
 ### 💵 分红管理
 - 项目终止后，基于最终利润进行分红
@@ -45,8 +57,8 @@
 ### 🔄 项目生命周期
 ```
 开放中 → 发起终止申请 → 审批通过 → 已终止(只读) → 分红结算
-                                                      ↓
-                                              可发起复活申请 → 恢复为开放中
+                                                     ↓
+                                             可发起复活申请 → 恢复为开放中
 ```
 
 ### 👥 权限体系
@@ -63,7 +75,7 @@
 | **ORM** | SQLAlchemy + SQLite |
 | **前端** | Jinja2 + Bootstrap 5 (Bootswatch Lux) + Chart.js |
 | **认证** | Flask-Login + Werkzeug 密码哈希 |
-| **部署** | Gunicorn + systemd (Ubuntu) |
+| **部署** | Gunicorn + systemd (Ubuntu) + Nginx |
 | **UI 增强** | Bootstrap Icons + Chart.js |
 
 ## 快速开始
@@ -143,6 +155,23 @@ project_management/
 └── uploads/               # 附件存储（不纳入版本控制）
 ```
 
+## 财务计算公式
+
+### 项目详情页字段
+
+| 字段 | 公式 |
+|---|---|
+| **应收（含介绍费）** | 合同全额（含中介费） |
+| **介绍费** | 合同约定的中介费总额 |
+| **未收到费用** | 应收 - 已收 |
+| **收入** | 已结算收入流水总额 |
+| **支出** | 已结算支出流水总额 |
+| **收支差额** | 收入 - 支出 |
+| **净利润** | 收入 - 支出 - 未付介绍费 |
+| **未付介绍费** | max(介绍费总额 - 中介费支出流水, 0) |
+
+> 净利润不会重复扣除已作为"中介费"支出记录的金额。
+
 ## 配置项（环境变量）
 
 | 变量 | 说明 | 默认值 |
@@ -160,25 +189,35 @@ project_management/
 
 ## 部署（生产环境）
 
-### Nginx + Gunicorn + systemd
+### 阿里云服务器
 
-参考 `scripts/` 目录下的启停脚本，结合 systemd 服务配置：
+| 项目 | 值 |
+|---|---|
+| IP | 39.108.114.245 |
+| SSH 配置 | `ssh aliyun`（密钥已配置） |
+| 部署路径 | `/root/project/PM/` |
+| 服务名 | `private-pm.service` |
+| 端口 | Nginx → 127.0.0.1:5002 |
+
+### Nginx + Gunicorn + systemd
 
 ```ini
 [Unit]
-Description=Private PM (Flask via gunicorn)
+Description=Private PM (Flask via gunicorn, conda env TIE)
 After=network.target
 
 [Service]
 User=root
 Group=root
-WorkingDirectory=/path/to/project
-Environment="SECRET_KEY=你的强密钥"
-Environment="DATABASE_URL=sqlite:////path/to/project/instance/ledger.db"
-Environment="UPLOAD_FOLDER=/path/to/project/uploads"
+WorkingDirectory=/root/project/PM
 Environment="URL_PREFIX=/PM"
-ExecStart=/path/to/python -m gunicorn -w 2 -b 127.0.0.1:5002 run:app
+Environment="SECRET_KEY=请换成随机强密钥"
+Environment="DATABASE_URL=sqlite:////root/project/PM/instance/ledger.db"
+Environment="UPLOAD_FOLDER=/root/project/PM/uploads"
+Environment="PATH=/root/miniconda3/envs/TIE/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/root/miniconda3/envs/TIE/bin/python -m gunicorn -w 2 -b 127.0.0.1:5002 run:app
 Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target

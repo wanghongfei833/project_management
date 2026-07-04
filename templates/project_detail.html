@@ -8,13 +8,53 @@
         {% if project.sub_projects %}<span class="badge text-bg-secondary ms-1" style="font-size:.65rem;">{{ all_sub_projects|length + project.sub_projects|length }} 个子项目</span>{% endif %}
       </div>
     </div>
-    <div class="d-flex gap-2 flex-wrap">
+    <div class="d-flex gap-2 flex-wrap align-items-center">
       {% if is_admin and project.status != 'ended' %}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=project.id) }}">编辑项目</a>
         <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.project_adjust', project_id=project.id) }}">追加应收</a>
       {% endif %}
       {% if project.status != 'ended' %}
         <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new', project_id=project.id) }}">新增流水</a>
+      {% endif %}
+      {% set member_ids = members|map(attribute='id')|list %}
+      {% if project.status == 'ended' %}
+        <span class="badge text-bg-danger">已终止</span>
+      {% elif end_req %}
+        <span class="small text-muted">终止申请（{{ end_approved_ids|length }}/{{ members|length }}）</span>
+        {% if current_user.id in end_approved_ids %}
+          <span class="badge text-bg-secondary">已同意</span>
+        {% elif current_user.id in member_ids or is_admin %}
+          <form method="post" action="{{ url_for('main.project_end_approve', project_id=project.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="submit">同意终止</button></form>
+        {% endif %}
+        {% if is_admin or end_req.created_by_user_id == current_user.id %}
+          <form method="post" action="{{ url_for('main.project_end_cancel', project_id=project.id) }}" class="d-inline" onsubmit="return confirm('确认取消终止申请？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary" type="submit">取消</button></form>
+        {% endif %}
+      {% elif current_user.id in member_ids or is_admin %}
+        <form method="post" action="{{ url_for('main.project_end_request', project_id=project.id) }}" onsubmit="return confirm('确认发起终止项目申请？终止后项目将冻结为只读，不可再操作流水/分红等。');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="submit">发起终止</button></form>
+      {% endif %}
+      {% if is_admin and not delete_req and project.status != 'ended' %}
+        <form method="post" action="{{ url_for('main.projects_delete_request', project_id=project.id) }}" onsubmit="return confirm('确认发起删除申请？');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" type="submit">发起删除</button></form>
+      {% endif %}
+      {% if delete_req %}
+        {% set member_id_list = members|map(attribute='id')|list %}
+        {% if current_user.id in approved_user_ids %}
+          <span class="badge text-bg-secondary">已同意删除</span>
+        {% elif current_user.id in member_id_list or is_admin %}
+          <form method="post" action="{{ url_for('main.projects_delete_approve', project_id=project.id) }}" onsubmit="return confirm('确认同意删除？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" type="submit">同意删除</button></form>
+        {% endif %}
+        {% if is_admin and delete_can_execute %}
+          <form method="post" action="{{ url_for('main.projects_delete_execute', project_id=project.id) }}" onsubmit="return confirm('确认删除？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-danger btn-sm" type="submit">执行删除</button></form>
+        {% endif %}
+        {% if is_admin %}
+          <form method="post" action="{{ url_for('main.projects_delete_cancel', project_id=project.id) }}" class="d-inline" onsubmit="return confirm('确认取消删除申请？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary" type="submit">取消删除</button></form>
+        {% endif %}
       {% endif %}
     </div>
   </div>
@@ -56,22 +96,33 @@
   {% endif %}
 
 
-  <div class="card mb-4">
-    <div class="card-body">
-      <div class="fw-semibold mb-3">项目信息</div>
+  <div class="card mb-4" style="background:#f8fafc !important;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e8ecf0;">
+    <div class="card-body" style="background:transparent !important;">
+      <div class="fw-semibold mb-3" style="color:#1a2332;font-size:1.05rem;">📊 项目信息</div>
       <div class="row g-3">
-        <div class="col-md-6">
-          <div class="text-muted small mb-1">项目成员</div>
-          <div class="d-flex flex-wrap gap-1">
-            {% for u in members %}
-              <span class="badge border {% if u.id == project.leader_user_id %}text-bg-primary{% else %}text-bg-light{% endif %} member-badge">{{ u.username }}</span>
-            {% else %}
-              <span class="text-muted">暂无成员</span>
+        <div class="col-md-4">
+          <div class="text-muted small mb-1">👥 项目人员</div>
+          <div class="small">
+            {% set leader_id = project.leader_user_id %}
+            {% for u in display_members %}
+              {% if u.id == leader_id %}
+                <div class="mb-1"><span class="text-muted">负责人</span> <strong>{{ u.username }}</strong></div>
+              {% endif %}
             {% endfor %}
+            <div style="max-height:120px;overflow-y:auto;scrollbar-width:thin;">
+              {% for u in display_members %}
+                {% if u.id != leader_id %}
+                  <div><span class="text-muted">人员</span> {{ u.username }}</div>
+                {% endif %}
+              {% endfor %}
+            </div>
+            {% if not display_members %}
+              <span class="text-muted">暂无成员</span>
+            {% endif %}
           </div>
         </div>
-        <div class="col-md-6">
-          <div class="text-muted small mb-1">周期</div>
+        <div class="col-md-8">
+          <div class="text-muted small mb-1">📅 周期</div>
           <div class="text-muted small">{{ project.planned_start_date }} → {{ project.planned_end_date }}</div>
           <div class="text-muted small">
             {% if days_left < 0 %}
@@ -82,96 +133,53 @@
             · 今天 {{ today }}
           </div>
           <div class="d-flex align-items-center gap-2 mt-2">
-            <div class="progress flex-grow-1" style="height:5px;border-radius:3px;">
+            <div class="progress flex-grow-1" style="height:6px;border-radius:4px;background:#dde1e5;">
               <div class="progress-bar {% if days_left < 0 %}progress-bar-striped bg-danger{% endif %}" role="progressbar" style="width:{{ progress_pct }}%;"></div>
             </div>
             <span class="small text-muted text-nowrap">{{ progress_pct }}%</span>
             {% if project.status != 'ended' %}<button class="btn btn-sm btn-outline-secondary ms-1" data-bs-toggle="modal" data-bs-target="#endDateModal">修改日期</button>{% endif %}
           </div>
           <hr class="my-2">
-          <div class="small d-flex gap-3 mb-2">
-            <div>
-              <span class="text-muted">项目总净额</span>
-              <span class="fw-semibold">¥ {{ '%.2f'|format(expected_net_cents/100) }}</span>
+          <div class="d-flex gap-3 flex-wrap mb-2 py-1">
+            <div class="rounded-3 px-3 py-2" style="min-width:150px;background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">应收（含介绍费）</div>
+              <div class="fw-bold" style="font-size:1.2rem;color:#1a2332;">¥ {{ '%.2f'|format(expected_total_cents/100) }}</div>
             </div>
-            <div>
-              <span class="text-muted">回款进度</span>
-              <span class="fw-semibold">{% set rpct = (received_cents / expected_total_cents * 100)|int if expected_total_cents > 0 else 0 %}¥ {{ '%.2f'|format(received_cents/100) }} / ¥ {{ '%.2f'|format(expected_total_cents/100) }}（{{ [rpct, 100]|min }}%）</span>
+            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">介绍费</div>
+              <div class="fw-semibold" style="font-size:1.1rem;color:#6c757d;">¥ {{ '%.2f'|format(broker_fee_expected_total_cents/100) }}</div>
             </div>
-            <div>
-              <span class="text-muted">中介费</span>
-              <span class="fw-semibold">¥ {{ '%.2f'|format(broker_estimated_cents/100) }}（已给） / ¥ {{ '%.2f'|format(broker_fee_expected_total_cents/100) }}（总共）</span>
+            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">未收到费用</div>
+              <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ '%.2f'|format((expected_total_cents - received_cents)/100) }}</div>
             </div>
           </div>
-          <hr class="my-2">
-          <div class="d-flex gap-3">
-            <div>
-              <div class="text-muted small">收入</div>
-              <div class="fw-semibold text-success" style="font-size:1.1rem;">¥ {{ '%.2f'|format(received_cents/100) }}</div>
+          <hr style="border-top:2px dashed #dde1e5;" class="my-2">
+          <div class="d-flex gap-3 flex-wrap py-1">
+            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">收入</div>
+              <div class="fw-bold text-success" style="font-size:1.15rem;">¥ {{ '%.2f'|format(received_cents/100) }}</div>
             </div>
-            <div>
-              <div class="text-muted small">支出</div>
-              <div class="fw-semibold text-danger" style="font-size:1.1rem;">¥ {{ '%.2f'|format(paid_cents/100) }}</div>
+            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">支出</div>
+              <div class="fw-bold" style="font-size:1.15rem;color:#e74c3c;">¥ {{ '%.2f'|format(paid_cents/100) }}</div>
             </div>
-            <div>
-              <div class="text-muted small">已实现盈利</div>
-              <div class="fw-bold {% if profit_realized_cents < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.1rem;">
-                ¥ {{ '%.2f'|format(profit_realized_cents/100) }}
+            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">收支差额</div>
+              <div class="fw-bold {% if (received_cents - paid_cents) < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.15rem;">¥ {{ '%.2f'|format((received_cents - paid_cents)/100) }}</div>
+            </div>
+            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">净利润</div>
+              {% set unpaid_broker = broker_fee_expected_total_cents - broker_paid_cents %}
+              {% if unpaid_broker < 0 %}{% set unpaid_broker = 0 %}{% endif %}
+              {% set net_profit = received_cents - paid_cents - unpaid_broker %}
+              <div class="fw-bold {% if net_profit < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.15rem;">
+                ¥ {{ '%.2f'|format(net_profit/100) }}
               </div>
             </div>
           </div>
         </div>
       </div>
-
-      <hr class="my-3">
-
-      <div class="d-flex justify-content-between align-items-start">
-        <div></div>
-        <div class="text-end">
-          <div class="text-muted small">终止项目</div>
-          {% set member_ids = members|map(attribute='id')|list %}
-          {% if project.status == 'ended' %}
-            <span class="badge text-bg-danger">已终止</span>
-          {% elif end_req %}
-            <div class="small">已发起终止申请，同意：{{ end_approved_ids|length }} / {{ members|length }}</div>
-            {% if current_user.id in end_approved_ids %}
-              <span class="badge text-bg-secondary">你已同意</span>
-            {% elif current_user.id in member_ids or is_admin %}
-              <form method="post" action="{{ url_for('main.project_end_approve', project_id=project.id) }}" class="d-inline">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="submit">同意终止</button></form>
-            {% endif %}
-            {% if is_admin or end_req.created_by_user_id == current_user.id %}
-              <form method="post" action="{{ url_for('main.project_end_cancel', project_id=project.id) }}" class="d-inline ms-1" onsubmit="return confirm('确认取消终止申请？');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button></form>
-            {% endif %}
-          {% elif current_user.id in member_ids or is_admin %}
-            <form method="post" action="{{ url_for('main.project_end_request', project_id=project.id) }}" onsubmit="return confirm('确认发起终止项目申请？终止后项目将冻结为只读，不可再操作流水/分红等。');">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="submit">发起终止</button></form>
-          {% endif %}
-        </div>
-      </div>
-
-      <div class="mt-2 d-flex gap-2 flex-wrap">
-        {% if is_admin and not delete_req and project.status != 'ended' %}
-          <form method="post" action="{{ url_for('main.projects_delete_request', project_id=project.id) }}" onsubmit="return confirm('确认发起删除申请？');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" type="submit">发起删除申请</button></form>
-        {% endif %}
-        {% if delete_req %}
-          {% set member_id_list = members|map(attribute='id')|list %}
-          {% if current_user.id in approved_user_ids %}
-            <span class="text-muted small align-self-center">你已同意删除</span>
-          {% elif current_user.id in member_id_list or is_admin %}
-            <form method="post" action="{{ url_for('main.projects_delete_approve', project_id=project.id) }}" onsubmit="return confirm('确认同意删除？');">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" type="submit">我同意删除</button></form>
-          {% endif %}
-          {% if is_admin and delete_can_execute %}
-            <form method="post" action="{{ url_for('main.projects_delete_execute', project_id=project.id) }}" onsubmit="return confirm('确认删除？');">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-danger btn-sm" type="submit">执行删除</button></form>
-          {% endif %}
-        {% endif %}
-      </div>
-    </div>
-  </div>
 
   <!-- 修改结束日期模态框 -->
   <div class="modal fade" id="endDateModal" tabindex="-1"><div class="modal-dialog modal-sm modal-dialog-centered"><div class="modal-content">
@@ -203,12 +211,13 @@
   </div></div></div>
   <!-- /模态框 -->
 
-  <div class="mb-4">
-    <div class="card mb-0">
-    <div class="card-header py-2" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#activityLogCollapse" aria-expanded="false" aria-controls="activityLogCollapse">
+  <div class="row g-3">
+    <div class="col-md-6">
+    <div class="card mb-0" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.05);border:1px solid #e8ecf0;">
+    <div class="card-header py-2" style="cursor: pointer;background:linear-gradient(135deg,#5b7fa5,#4a6d8c);color:#fff;border-radius:10px 10px 0 0;" data-bs-toggle="collapse" data-bs-target="#activityLogCollapse" aria-expanded="false" aria-controls="activityLogCollapse">
       <div class="d-flex justify-content-between align-items-center">
-        <span class="fw-semibold">操作记录</span>
-        <span class="text-muted small">点击展开 ▼</span>
+        <span class="fw-bold"><span style="font-size:1.1rem;">📋</span> 操作记录</span>
+        <span class="small opacity-75">点击展开 ▼</span>
       </div>
     </div>
     <div id="activityLogCollapse" class="collapse">
@@ -220,8 +229,8 @@
           <span class="badge text-bg-light border log-filter" data-filter="finance" style="cursor:pointer;">💳 财政日志</span>
           <span class="badge text-bg-light border log-filter" data-filter="other" style="cursor:pointer;">🔧 其他日志</span>
         </div>
-        <ul class="list-unstyled mb-0 small">
-          {% for log in activity_logs %}
+        <ul class="list-unstyled mb-0 small" style="max-height:300px;overflow-y:auto;scrollbar-width:thin;">
+          {% for log in activity_logs[:10] %}
             {% set log_type = log.action.split('.')[0] %}
             <li class="border-bottom py-2 log-item" data-log-type="{{ log_type }}" data-log-action="{{ log.action }}">
               <div class="d-flex justify-content-between">
@@ -247,19 +256,20 @@
     </div>
     <hr class="my-1">
   </div>
-
-    {% if project_updates %}
-    <div class="card mb-0 mt-3">
+    </div>
+    <div class="col-md-6">
+    <div class="card mb-0" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.05);border:1px solid #e8ecf0;">
       <div class="card-body p-0">
-        <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
-          <span class="fw-semibold small">📁 进展日志</span>
+        <div class="d-flex justify-content-between align-items-center px-3 py-2" style="background:linear-gradient(135deg,#5b7fa5,#4a6d8c);color:#fff;border-radius:10px 10px 0 0;">
+          <span class="fw-bold"><span style="font-size:1.1rem;">📁</span> 进展日志</span>
           <div>
             <a href="{{ url_for('main.project_logs_new', project_id=project.id) }}" class="btn btn-sm btn-success py-0">+ 新增</a>
-            <a href="{{ url_for('main.project_logs', project_id=project.id) }}" class="btn btn-sm btn-outline-secondary py-0 ms-1">查看全部</a>
+            <a href="{{ url_for('main.project_logs', project_id=project.id) }}" class="btn btn-sm btn-outline-light py-0 ms-1">查看全部</a>
           </div>
         </div>
-        <div class="px-3 py-1">
-          {% for u in project_updates[:5] %}
+        {% if project_updates %}
+        <div class="px-3 py-1" style="max-height:300px;overflow-y:auto;scrollbar-width:thin;">
+          {% for u in project_updates[:10] %}
             <a href="{{ url_for('main.project_logs', project_id=project.id, log_id=u.id) }}" class="d-flex align-items-center gap-2 py-1 text-decoration-none border-bottom" style="font-size:.8rem;">
               <span class="text-muted text-nowrap">{{ u.created_at.strftime('%m-%d') if u.created_at else '' }}</span>
               <span class="fw-semibold text-dark">{{ u.author.username if u.author else '?' }}</span>
@@ -267,9 +277,10 @@
             </a>
           {% endfor %}
         </div>
+      {% endif %}
       </div>
     </div>
-  {% endif %}
+    </div>
   </div>
 
 <script>
@@ -294,15 +305,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
 });
 </script>
 
-<details class="mt-2"><summary class="small text-muted" style="cursor:pointer;">合同与回款详情</summary>
-    <div class="row g-2 mt-2 small">
-      <div class="col-md-4">合同全额：<span class="fw-semibold">¥ {{ '%.2f'|format(expected_total_cents/100) }}</span></div>
-      <div class="col-md-4">未回款：<span class="fw-semibold text-danger">¥ {{ '%.2f'|format(remaining_gross_cents/100) }}</span></div>
-      <div class="col-md-4">我方净应收：<span class="fw-semibold">¥ {{ '%.2f'|format(expected_net_cents/100) }}</span></div>
-      <div class="col-md-4">我方未收净：<span class="fw-semibold text-danger">¥ {{ '%.2f'|format(remaining_net_cents/100) }}</span></div>
-    </div>
-  </details>
-    </div>
+  </div>
   </div>
 
   <div class="d-flex justify-content-between align-items-center mb-2">
