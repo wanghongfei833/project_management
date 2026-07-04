@@ -209,7 +209,7 @@ def _dividend_remaining_cents(project: Project) -> int:
         .scalar()
         or 0
     )
-    paid_cents_excl_dividend = int(paid_cents_all)
+    paid_cents_excl_dividend = max(int(paid_cents_all) - dividend_expense_cents, 0)
     expected_total_cents = project_expected_total_cents(pid)
     finance = build_project_finance(
         project,
@@ -226,7 +226,7 @@ def _dividend_remaining_cents(project: Project) -> int:
         .scalar()
         or 0
     )
-    return max(dividend_base_cents - dividend_paid_total_cents, 0)
+    return max(dividend_base_cents - max(dividend_paid_total_cents, dividend_expense_cents), 0)
 
 
 def project_expected_total_cents(project_id: int) -> int:
@@ -496,7 +496,7 @@ def dashboard():
                 .filter(ProjectDividendDistribution.project_id == p.id)
                 .scalar() or 0
             )
-            div_remaining = max(div_base - div_paid, 0)
+            div_remaining = max(div_base - max(div_paid, div_expense), 0)
 
         row = {
             "project": p,
@@ -1953,7 +1953,7 @@ def project_dividend_page(project_id: int):
                 db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"))
         .scalar() or 0
     )
-    paid_excl_div = paid_cents_all
+    paid_excl_div = max(paid_cents_all - div_expense, 0)
     exp_total = project_expected_total_cents(p.id)
     fin = build_project_finance(p, expected_total_cents=exp_total, received_settled_income_bank_cents=received_cents)
     received_net = fin["received_net_cents"]
@@ -1962,7 +1962,7 @@ def project_dividend_page(project_id: int):
         db.session.query(db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0))
         .filter(ProjectDividendDistribution.project_id == p.id).scalar() or 0
     )
-    div_remaining = max(div_base - div_paid, 0)
+    div_remaining = max(div_base - max(div_paid, div_expense), 0)
 
     # 分红对象：排除 admin 的项目成员
     members = (
@@ -2055,7 +2055,7 @@ def project_dividend_post(project_id: int):
                 db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"))
         .scalar() or 0
     )
-    paid_excl_div = paid_cents_all
+    paid_excl_div = max(paid_cents_all - div_expense, 0)
     fin = build_project_finance(p, expected_total_cents=project_expected_total_cents(p.id),
                                 received_settled_income_bank_cents=received_cents)
     div_base = max(int(fin["received_net_cents"]) - paid_excl_div, 0)
@@ -2063,7 +2063,7 @@ def project_dividend_post(project_id: int):
         db.session.query(db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0))
         .filter(ProjectDividendDistribution.project_id == p.id).scalar() or 0
     )
-    div_remaining = max(div_base - div_paid, 0)
+    div_remaining = max(div_base - max(div_paid, div_expense), 0)
 
     if total_amt > div_remaining:
         flash(f"分红总额超出剩余可分红额度（剩余 ¥{cents_to_yuan(div_remaining)}）", "danger")
@@ -2074,7 +2074,7 @@ def project_dividend_post(project_id: int):
         db.session.query(db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0))
         .filter(ProjectDividendDistribution.project_id == p.id).scalar() or 0
     )
-    latest_div_remaining = max(div_base - latest_div_paid, 0)
+    latest_div_remaining = max(div_base - max(latest_div_paid, div_expense), 0)
     if total_amt > latest_div_remaining:
         flash(f"分红额度已发生变化（剩余 ¥{cents_to_yuan(latest_div_remaining)}），请重新提交", "danger")
         return redirect(url_for("main.project_dividend_page", project_id=p.id))
@@ -2619,7 +2619,7 @@ def project_detail(project_id: int):
 
     profit_realized_cents = int(received_net_cents) - int(paid_cents)
     profit_if_fully_collected_cents = int(expected_net_cents) - int(paid_cents)
-    dividend_base_cents = max(int(received_net_cents) - int(paid_cents), 0)
+    dividend_base_cents = max(int(received_net_cents) - max(int(paid_cents) - dividend_expense_cents, 0), 0)
     dividend_paid_total_cents = int(
         db.session.query(
             db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0)
@@ -2628,9 +2628,7 @@ def project_detail(project_id: int):
         .scalar()
         or 0
     )
-    dividend_remaining_cents = max(
-        dividend_base_cents - dividend_paid_total_cents, 0
-    )
+    dividend_remaining_cents = max(dividend_base_cents - max(dividend_paid_total_cents, dividend_expense_cents), 0)
     dividend_rows = (
         ProjectDividendDistribution.query.filter_by(project_id=p.id)
         .order_by(ProjectDividendDistribution.created_at.desc())
