@@ -143,30 +143,30 @@
           <div class="d-flex gap-3 flex-wrap mb-2 py-1">
             <div class="rounded-3 px-3 py-2" style="min-width:150px;background:#fff;border:1px solid #e8ecf0;">
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">应收（含介绍费）</div>
-              <div class="fw-bold" style="font-size:1.2rem;color:#1a2332;">¥ {{ '%.2f'|format(expected_total_cents/100) }}</div>
+              <div class="fw-bold" style="font-size:1.2rem;color:#1a2332;">¥ {{ expected_total_cents|money }}</div>
             </div>
             <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">介绍费</div>
-              <div class="fw-semibold" style="font-size:1.1rem;color:#6c757d;">¥ {{ '%.2f'|format(broker_fee_expected_total_cents/100) }}</div>
+              <div class="fw-semibold" style="font-size:1.1rem;color:#6c757d;">¥ {{ broker_fee_expected_total_cents|money }}</div>
             </div>
             <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">未收到费用</div>
-              <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ '%.2f'|format((expected_total_cents - received_cents)/100) }}</div>
+              <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ (expected_total_cents - received_cents)|money }}</div>
             </div>
           </div>
           <hr style="border-top:2px dashed #dde1e5;" class="my-2">
           <div class="d-flex gap-3 flex-wrap py-1">
             <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">收入</div>
-              <div class="fw-bold text-success" style="font-size:1.15rem;">¥ {{ '%.2f'|format(received_cents/100) }}</div>
+              <div class="fw-bold text-success" style="font-size:1.15rem;">¥ {{ received_cents|money }}</div>
             </div>
             <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">支出</div>
-              <div class="fw-bold" style="font-size:1.15rem;color:#e74c3c;">¥ {{ '%.2f'|format(paid_cents/100) }}</div>
+              <div class="fw-bold" style="font-size:1.15rem;color:#e74c3c;">¥ {{ paid_cents|money }}</div>
             </div>
             <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">收支差额</div>
-              <div class="fw-bold {% if (received_cents - paid_cents) < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.15rem;">¥ {{ '%.2f'|format((received_cents - paid_cents)/100) }}</div>
+              <div class="fw-bold {% if (received_cents - paid_cents) < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.15rem;">¥ {{ (received_cents - paid_cents)|money }}</div>
             </div>
             <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">净利润</div>
@@ -174,7 +174,7 @@
               {% if unpaid_broker < 0 %}{% set unpaid_broker = 0 %}{% endif %}
               {% set net_profit = received_cents - paid_cents - unpaid_broker %}
               <div class="fw-bold {% if net_profit < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.15rem;">
-                ¥ {{ '%.2f'|format(net_profit/100) }}
+                ¥ {{ net_profit|money }}
               </div>
             </div>
           </div>
@@ -330,7 +330,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
         {% for a in adjustments %}
           <tr class="{% if a.status == 'pending' %}table-warning{% endif %}">
             <td class="text-muted small">{{ a.created_at }}</td>
-            <td class="text-end">¥ {{ '%.2f'|format(a.amount_cents/100) }}</td>
+            <td class="text-end">¥ {{ a.amount_cents|money }}</td>
             <td class="text-truncate" style="max-width: 520px;">{{ a.note or '' }}</td>
             <td>
               {% if a.status == 'active' or a.status == 'executed' %}
@@ -395,7 +395,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
             <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
               <td>{{ t.occur_date }}</td>
               <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
-              <td class="text-end">¥ {{ '%.2f'|format(t.amount_cents/100) }}</td>
+              <td class="text-end">¥ {{ t.amount_cents|money }}</td>
               <td><span class="badge text-bg-warning">待审核</span></td>
               <td>{% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}{{ user_name_map[t.recipient_user_id] }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
               <td class="small">{{ t.created_by.username if t.created_by else '—' }}</td>
@@ -470,7 +470,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
             <td>{{ t.occur_date }}</td>
             <td class="text-end">
               {% if t.type == 'income' %}<span class="text-success fw-bold">+</span>{% else %}<span class="text-danger fw-bold">−</span>{% endif %}
-              ¥ {{ '%.2f'|format(t.amount_cents/100) }}
+              ¥ {{ t.amount_cents|money }}
               {% if t.settled %}<span class="badge text-bg-success-subtle text-success border-success-subtle" style="font-size:.6rem;">已到账</span>{% else %}<span class="badge text-bg-warning-subtle text-warning border-warning-subtle" style="font-size:.6rem;">未到账</span>{% endif %}
               {% if t.status == 'active' and project.status != 'ended' and current_user.id in member_ids %}
                 <div class="dropdown d-inline ms-1">
@@ -488,7 +488,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
                 </div>
               {% endif %}
             </td>
-            <td class="text-end small fw-semibold">¥ {{ '%.2f'|format((balance_after_by_tx_id.get(t.id, 0))/100) }}</td>
+            <td class="text-end small fw-semibold">¥ {{ (balance_after_by_tx_id.get(t.id, 0))|money }}</td>
             <td>{% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}{{ user_name_map[t.recipient_user_id] }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
             <td class="small">{{ t.created_by.username if t.created_by else '—' }}</td>
             <td class="text-truncate" style="max-width: 360px;">{{ t.note or '' }}</td>

@@ -12,16 +12,19 @@ from flask import (
     abort,
     current_app,
     flash,
+    g,
     jsonify,
     redirect,
     render_template,
     request,
     send_from_directory,
+    session,
     url_for,
 )
 from flask_login import current_user, login_required, login_user, logout_user
 
 from .extensions import db
+from .utils import format_cents
 from .project_finance import (
     BROKER_DIR_NET_FROM_BROKER,
     BROKER_DIR_WE_PAY,
@@ -89,6 +92,7 @@ from .upload_paths import (
     project_update_attachment_relpath,
     transaction_attachment_relpath,
 )
+from .pending import pending_items_for_user
 from .utils import safe_join_upload, sha256_file
 
 bp = Blueprint("main", __name__)
@@ -250,6 +254,59 @@ def project_expected_total_cents(project_id: int) -> int:
     return int(base) + int(extra)
 
 
+# ===== 待我处理（审批提醒）=====
+
+
+@bp.before_request
+def _load_pending_approvals():
+    """每次请求只算一次待办，供导航铃铛 / 登录弹窗 / 待办页共用。"""
+    if not getattr(current_user, "is_authenticated", False):
+        return
+    try:
+        all_items = pending_items_for_user(
+            int(current_user.id), is_admin_user=is_admin()
+        )
+    except Exception:  # pragma: no cover - 待办统计失败不应影响正常页面
+        current_app.logger.exception("计算待处理事项失败")
+        all_items = []
+    g.pending_items = [i for i in all_items if not i.approved_by_me]
+    g.pending_waiting = [i for i in all_items if i.approved_by_me]
+    g.pending_count = len(g.pending_items)
+    # 登录后第一次打开页面时弹窗提醒；只弹一次
+    g.show_pending_modal = bool(session.pop("show_pending_modal", False)) and bool(
+        g.pending_items
+    )
+
+
+@bp.after_request
+def _honor_next_redirect(response):
+    """让「待办页」的表单在操作后跳回原页面（仅接受站内路径）。"""
+    if response.status_code not in (301, 302, 303, 307, 308):
+        return response
+    target = (request.form.get("next") or "").strip()
+    if (
+        target.startswith("/")
+        and not target.startswith("//")
+        and "\n" not in target
+        and "\r" not in target
+    ):
+        response.headers["Location"] = target
+    return response
+
+
+@bp.get("/approvals")
+@login_required
+def approvals_list():
+    """待我处理：需要我同意的申请 + 我已同意但还在等别人的申请。"""
+    return render_template(
+        "approvals_list.html",
+        todo_items=getattr(g, "pending_items", []),
+        waiting_items=getattr(g, "pending_waiting", []),
+        pending_count=getattr(g, "pending_count", 0),
+        is_admin=is_admin(),
+    )
+
+
 @bp.route("/me/password", methods=["GET", "POST"])
 @login_required
 def change_password():
@@ -399,6 +456,8 @@ def login():
             flash("用户名或密码错误", "danger")
             return render_template("login.html", form=form)
         login_user(user)
+        # 下次打开页面时弹一次「待我处理」提醒
+        session["show_pending_modal"] = True
         return redirect(url_for("main.dashboard"))
 
     return render_template("login.html", form=form)
@@ -2066,7 +2125,7 @@ def project_dividend_post(project_id: int):
     div_remaining = max(div_base - max(div_paid, div_expense), 0)
 
     if total_amt > div_remaining:
-        flash(f"分红总额超出剩余可分红额度（剩余 ¥{cents_to_yuan(div_remaining)}）", "danger")
+        flash(f"分红总额超出剩余可分红额度（剩余 ¥{format_cents(div_remaining)}）", "danger")
         return redirect(url_for("main.project_dividend_page", project_id=p.id))
 
     # 二次校验：在事务中重新确认剩余可分红（防并发超分）
@@ -2076,7 +2135,7 @@ def project_dividend_post(project_id: int):
     )
     latest_div_remaining = max(div_base - max(latest_div_paid, div_expense), 0)
     if total_amt > latest_div_remaining:
-        flash(f"分红额度已发生变化（剩余 ¥{cents_to_yuan(latest_div_remaining)}），请重新提交", "danger")
+        flash(f"分红额度已发生变化（剩余 ¥{format_cents(latest_div_remaining)}），请重新提交", "danger")
         return redirect(url_for("main.project_dividend_page", project_id=p.id))
 
     # 校验现金结余
@@ -2092,7 +2151,7 @@ def project_dividend_post(project_id: int):
     )
     cash_balance = income_settled - expense_settled
     if total_amt > cash_balance:
-        flash(f"分红金额超出项目当前可用结余（结余 ¥{cents_to_yuan(cash_balance)}）", "danger")
+        flash(f"分红金额超出项目当前可用结余（结余 ¥{format_cents(cash_balance)}）", "danger")
         return redirect(url_for("main.project_dividend_page", project_id=p.id))
 
     # 创建一笔聚合支出流水
@@ -2119,11 +2178,11 @@ def project_dividend_post(project_id: int):
     member_names = "、".join(u.username for u, _ in dividend_items)
     _log_project_activity(
         int(p.id), "dividend.payout",
-        f"批量分红 ¥{cents_to_yuan(int(total_amt))} → {member_names}",
+        f"批量分红 ¥{format_cents(int(total_amt))} → {member_names}",
         detail=f"transaction_id={tx.id}",
     )
     db.session.commit()
-    flash(f"分红完成：¥{cents_to_yuan(int(total_amt))} 分给 {len(dividend_items)} 人", "success")
+    flash(f"分红完成：¥{format_cents(int(total_amt))} 分给 {len(dividend_items)} 人", "success")
     return redirect(url_for("main.project_dividend_page", project_id=p.id))
 
 
@@ -2906,11 +2965,11 @@ def transactions_new():
             db.session.flush()
             db.session.add(TransactionCreateApproval(request_id=creq.id, user_id=current_user.id))
             _log_project_activity(pid, "transaction.create_request",
-                f"发起新增流水 #{tx.id} 审批：{typ} ¥{cents_to_yuan(int(tx.amount_cents))}，日期 {tx.occur_date}"
+                f"发起新增流水 #{tx.id} 审批：{typ} ¥{format_cents(int(tx.amount_cents))}，日期 {tx.occur_date}"
                 + (f"，附件 {added} 个" if added else ""), detail=f"request_id={creq.id}")
         else:
             _log_project_activity(pid, "transaction.create",
-                f"新增流水 #{tx.id}：{typ} ¥{cents_to_yuan(int(tx.amount_cents))}，日期 {tx.occur_date}"
+                f"新增流水 #{tx.id}：{typ} ¥{format_cents(int(tx.amount_cents))}，日期 {tx.occur_date}"
                 + (f"，附件 {added} 个" if added else ""))
         db.session.commit()
         if tx_status == "pending":
@@ -2921,12 +2980,51 @@ def transactions_new():
     return render_template("transaction_form.html", form=form, is_admin=is_admin())
 
 
+def _parse_iso_date(raw) -> date | None:
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _earnings_range_from_request(args) -> tuple[date | None, date | None]:
+    """解析收入页的时间筛选参数（按项目实际终止时间 ended_at）。
+
+    - 不带参数：默认本年（1/1 ~ 今天）
+    - ?all=1，或 start/end 都留空：不限时间，返回 (None, None)
+    """
+    today = date.today()
+    if args.get("all"):
+        return None, None
+    if "start" in args or "end" in args:
+        return _parse_iso_date(args.get("start")), _parse_iso_date(args.get("end"))
+    return date(today.year, 1, 1), today
+
+
 @bp.get("/earnings")
 @login_required
 def personal_earnings():
-    """个人收入查看：admin 看全部，普通用户只看自己。"""
+    """个人收入查看：admin 看全部，普通用户只看自己。
+
+    时间筛选按【项目实际终止时间】(projects.ended_at) 生效：首次进入默认本年；
+    一旦限定区间，未终止（ended_at 为空）的项目不参与统计。
+    """
     is_admin_user = is_admin()
     target_user_id = request.args.get("user_id", type=int)
+
+    start_d, end_d = _earnings_range_from_request(request.args)
+    # ended_at 存的是 naive UTC，页面也按该值展示，这里用同一口径比较（区间左闭右开）
+    lo = datetime.combine(start_d, datetime.min.time()) if start_d else None
+    hi = (
+        datetime.combine(end_d + timedelta(days=1), datetime.min.time())
+        if end_d
+        else None
+    )
+    ranged = lo is not None or hi is not None
+
     if is_admin_user and target_user_id:
         users_q = [db.session.get(User, target_user_id)]
         users_q = [u for u in users_q if u]
@@ -2960,11 +3058,27 @@ def personal_earnings():
         pd = []
         for pid, vals in sorted(project_totals.items()):
             p = db.session.get(Project, pid)
-            if not p: continue
+            if not p:
+                continue
+            if ranged:
+                if p.ended_at is None:
+                    continue
+                if lo is not None and p.ended_at < lo:
+                    continue
+                if hi is not None and p.ended_at >= hi:
+                    continue
             pd.append({"project_name": p.name, "payment": vals["payment"], "dividend": vals["dividend"]})
             tp += vals["payment"]; td += vals["dividend"]
         rows.append({"user": u, "projects": pd, "total_payment": tp, "total_dividend": td, "grand_total": tp + td})
-    return render_template("personal_earnings.html", rows=rows, is_admin=is_admin_user)
+    return render_template(
+        "personal_earnings.html",
+        rows=rows,
+        is_admin=is_admin_user,
+        start=start_d.isoformat() if start_d else "",
+        end=end_d.isoformat() if end_d else "",
+        ranged=ranged,
+        selected_user_id=target_user_id,
+    )
 
 
 @bp.route("/transactions/<int:transaction_id>/edit", methods=["GET", "POST"])
@@ -3042,7 +3156,7 @@ def transactions_edit(transaction_id: int):
         _log_project_activity(
             int(tx.project_id),
             "transaction.edit_request",
-            f"发起流水 #{tx.id} 修改申请 → {ntyp} ¥{cents_to_yuan(int(req.new_amount_cents))}，{req.new_occur_date}"
+            f"发起流水 #{tx.id} 修改申请 → {ntyp} ¥{format_cents(int(req.new_amount_cents))}，{req.new_occur_date}"
             + (f"；追加凭证 {added} 个" if added else "")
             + (f"；移除凭证 {removed} 个" if removed else ""),
             detail=f"request_id={req.id}",
@@ -3064,7 +3178,7 @@ def transactions_edit(transaction_id: int):
             _log_project_activity(
                 int(tx.project_id),
                 "transaction.edit_execute",
-                f"修改自动执行（流水 #{tx.id}）：{ntyp} ¥{cents_to_yuan(int(req.new_amount_cents))}",
+                f"修改自动执行（流水 #{tx.id}）：{ntyp} ¥{format_cents(int(req.new_amount_cents))}",
                 detail=f"request_id={req.id}",
             )
             msg = "修改申请已提交，条件满足已自动执行生效"
@@ -3143,7 +3257,7 @@ def transactions_edit_approve(transaction_id: int):
         _log_project_activity(
             int(tx.project_id),
             "transaction.edit_execute",
-            f"修改自动执行（流水 #{tx.id}）：{ntyp} ¥{cents_to_yuan(int(req.new_amount_cents))}，{req.new_occur_date}",
+            f"修改自动执行（流水 #{tx.id}）：{ntyp} ¥{format_cents(int(req.new_amount_cents))}，{req.new_occur_date}",
             detail=f"request_id={req.id}",
         )
         db.session.commit()
@@ -3193,7 +3307,7 @@ def transactions_edit_execute(transaction_id: int):
     _log_project_activity(
         int(tx.project_id),
         "transaction.edit_execute",
-        f"管理员执行流水 #{tx.id} 修改：{ntyp} ¥{cents_to_yuan(int(req.new_amount_cents))}，{req.new_occur_date}",
+        f"管理员执行流水 #{tx.id} 修改：{ntyp} ¥{format_cents(int(req.new_amount_cents))}，{req.new_occur_date}",
         detail=f"request_id={req.id}",
     )
     db.session.commit()
@@ -3573,7 +3687,7 @@ def project_adjust(project_id: int):
             _log_project_activity(
                 int(p.id),
                 "project.adjust_request",
-                f"发起追加应收 ¥{cents_to_yuan(int(adj.amount_cents))} 申请"
+                f"发起追加应收 ¥{format_cents(int(adj.amount_cents))} 申请"
                 + (f"（{adj.note}）" if adj.note else ""),
                 detail=f"adjustment_id={adj.id}",
             )
@@ -3583,7 +3697,7 @@ def project_adjust(project_id: int):
             _log_project_activity(
                 int(p.id),
                 "project.adjust_expected",
-                f"追加应收 ¥{cents_to_yuan(int(adj.amount_cents))}"
+                f"追加应收 ¥{format_cents(int(adj.amount_cents))}"
                 + (f"（{adj.note}）" if adj.note else ""),
                 detail=f"adjustment_id={adj.id}",
             )
@@ -3639,7 +3753,7 @@ def project_adjust_approve(project_id: int, adjustment_id: int):
         _log_project_activity(
             int(p.id),
             "project.adjust_execute",
-            f"追加应收自动执行：¥{cents_to_yuan(int(adj.amount_cents))}"
+            f"追加应收自动执行：¥{format_cents(int(adj.amount_cents))}"
             + (f"（{adj.note}）" if adj.note else ""),
         )
         db.session.commit()
@@ -3671,7 +3785,7 @@ def project_adjust_cancel(project_id: int, adjustment_id: int):
     _log_project_activity(
         int(p.id),
         "project.adjust_cancel",
-        f"取消追加应收 ¥{cents_to_yuan(int(adj.amount_cents))} 申请",
+        f"取消追加应收 ¥{format_cents(int(adj.amount_cents))} 申请",
     )
     db.session.commit()
     flash("已取消追加应收申请", "success")
@@ -3709,4 +3823,3 @@ def uploads(filename: str):
         abort(403)
 
     abort(403)
-

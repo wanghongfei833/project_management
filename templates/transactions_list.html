@@ -41,7 +41,7 @@
             <td>{{ t.occur_date }}</td>
             <td>{{ t.project.name if t.project else '（无）' }}</td>
             <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
-            <td class="text-end">¥ {{ '%.2f'|format(t.amount_cents/100) }}</td>
+            <td class="text-end">¥ {{ t.amount_cents|money }}</td>
             <td>{{ '已结算' if t.settled else '未结算' }}</td>
             <td>{% if t.counterparty == '项目人员' and t.recipient_user %}{{ t.recipient_user.username }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
             <td>

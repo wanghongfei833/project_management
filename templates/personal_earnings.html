@@ -2,7 +2,10 @@
 {% block title %}个人收入 - 项目账本{% endblock %}
 {% block content %}
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h4 mb-0">个人收入</h1>
+    <div>
+      <h1 class="h4 mb-0">个人收入</h1>
+      <div class="text-muted small">按项目汇总「项目人员报酬 + 分红收入」，可按项目终止时间筛选</div>
+    </div>
     {% if is_admin %}
       <div class="dropdown">
         <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
@@ -10,18 +13,39 @@
         </button>
         <ul class="dropdown-menu dropdown-menu-end">
           {% for u in rows|map(attribute='user') %}
-            <li><a class="dropdown-item" href="{{ url_for('main.personal_earnings', user_id=u.id) }}">{{ u.username }}</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('main.personal_earnings', user_id=u.id, start=start, end=end) }}">{{ u.username }}</a></li>
           {% endfor %}
         </ul>
       </div>
     {% endif %}
   </div>
 
+  <form class="row g-2 align-items-end mb-2" method="get">
+    {% if selected_user_id %}<input type="hidden" name="user_id" value="{{ selected_user_id }}">{% endif %}
+    <div class="col-sm-6 col-md-3">
+      <label class="form-label small text-muted">项目终止日期（起）</label>
+      <input class="form-control form-control-sm" type="date" name="start" value="{{ start }}">
+    </div>
+    <div class="col-sm-6 col-md-3">
+      <label class="form-label small text-muted">项目终止日期（止）</label>
+      <input class="form-control form-control-sm" type="date" name="end" value="{{ end }}">
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-sm btn-primary" type="submit">查询</button>
+    </div>
+    <div class="col-auto">
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.personal_earnings', user_id=selected_user_id, all=1) }}">不限时间</a>
+    </div>
+  </form>
+  <div class="text-muted small mb-3">
+    按<b>项目实际终止时间</b>筛选{% if ranged %}（当前范围：{{ start or '不限' }} ~ {{ end or '不限' }}）{% endif %}；未终止的项目只在「不限时间」时统计。
+  </div>
+
   {% for row in rows %}
     <div class="card mb-4">
       <div class="card-header">
         <span class="fw-semibold">{{ row.user.username }}</span>
-        <span class="text-muted small ms-2">总收入：¥ {{ '%.2f'|format(row.grand_total/100) }}</span>
+        <span class="text-muted small ms-2">总收入：¥ {{ row.grand_total|money }}</span>
       </div>
       <div class="card-body p-0">
         <div class="table-responsive">
@@ -38,20 +62,24 @@
               {% for p in row.projects %}
                 <tr>
                   <td>{{ p.project_name }}</td>
-                  <td class="text-end">{% if p.payment > 0 %}¥ {{ '%.2f'|format(p.payment/100) }}{% else %}—{% endif %}</td>
-                  <td class="text-end">{% if p.dividend > 0 %}¥ {{ '%.2f'|format(p.dividend/100) }}{% else %}—{% endif %}</td>
-                  <td class="text-end fw-semibold">¥ {{ '%.2f'|format((p.payment+p.dividend)/100) }}</td>
+                  <td class="text-end">{% if p.payment > 0 %}¥ {{ p.payment|money }}{% else %}—{% endif %}</td>
+                  <td class="text-end">{% if p.dividend > 0 %}¥ {{ p.dividend|money }}{% else %}—{% endif %}</td>
+                  <td class="text-end fw-semibold">¥ {{ (p.payment+p.dividend)|money }}</td>
                 </tr>
               {% else %}
-                <tr><td colspan="4" class="text-muted">暂无收入记录</td></tr>
+                <tr>
+                  <td colspan="4" class="text-muted">
+                    {% if ranged %}该时间范围内没有已终止项目的收入记录{% else %}暂无收入记录{% endif %}
+                  </td>
+                </tr>
               {% endfor %}
             </tbody>
             <tfoot>
               <tr class="table-active">
                 <td class="fw-semibold">合计</td>
-                <td class="text-end">¥ {{ '%.2f'|format(row.total_payment/100) }}</td>
-                <td class="text-end">¥ {{ '%.2f'|format(row.total_dividend/100) }}</td>
-                <td class="text-end fw-bold">¥ {{ '%.2f'|format(row.grand_total/100) }}</td>
+                <td class="text-end">¥ {{ row.total_payment|money }}</td>
+                <td class="text-end">¥ {{ row.total_dividend|money }}</td>
+                <td class="text-end fw-bold">¥ {{ row.grand_total|money }}</td>
               </tr>
             </tfoot>
           </table>

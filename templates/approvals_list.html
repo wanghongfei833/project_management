@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}待我处理 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h4 mb-0">待我处理</h1>
+      <div class="text-muted small">需要你点「同意」的申请；全部成员同意（或管理员同意）后自动生效</div>
+    </div>
+    <span class="badge {% if pending_count %}text-bg-danger{% else %}text-bg-success{% endif %} fs-6">
+      {{ pending_count }} 待处理
+    </span>
+  </div>
+
+  {% if todo_items %}
+    <div class="list-group shadow-sm mb-4">
+      {% with items = todo_items %}{% include "_pending_items.html" %}{% endwith %}
+    </div>
+  {% else %}
+    <div class="alert alert-success shadow-sm">
+      <i class="bi bi-check-circle me-2"></i>目前没有需要你处理的申请。
+    </div>
+  {% endif %}
+
+  {% if waiting_items %}
+    <h2 class="h6 text-muted mb-2">
+      <i class="bi bi-hourglass-split me-1"></i>我已同意，等待其他人（{{ waiting_items|length }}）
+    </h2>
+    <div class="list-group shadow-sm mb-4">
+      {% with items = waiting_items %}{% include "_pending_items.html" %}{% endwith %}
+    </div>
+  {% endif %}
+{% endblock %}

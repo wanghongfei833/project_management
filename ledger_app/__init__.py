@@ -78,16 +78,26 @@ def create_app():
     login_manager.init_app(app)
     csrf.init_app(app)
 
+    # 「分」-> 带千分位的元字符串，模板里用 {{ cents|money }} 展示
+    from .utils import format_cents
+
+    app.jinja_env.filters["money"] = format_cents
+
     from .routes import bp as main_bp
 
     app.register_blueprint(main_bp)
 
     @app.context_processor
     def inject_nav_flags():
+        from flask import g
         from flask_login import current_user
 
         return {
             "is_admin": getattr(current_user, "role", None) == Role.ADMIN.value,
+            "pending_count": getattr(g, "pending_count", 0),
+            "pending_items": getattr(g, "pending_items", []),
+            "pending_waiting": getattr(g, "pending_waiting", []),
+            "show_pending_modal": getattr(g, "show_pending_modal", False),
         }
 
     with app.app_context():
@@ -98,4 +108,3 @@ def create_app():
             ensure_seed_data()
 
     return app
-

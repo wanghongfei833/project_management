@@ -12,13 +12,23 @@
     </div>
   </div>
 
+  {% if pending_count %}
+    <div class="alert alert-warning alert-dismissible fade show shadow-sm d-flex justify-content-between align-items-center">
+      <div>
+        <i class="bi bi-bell-fill me-2"></i>你有 <strong>{{ pending_count }}</strong> 件申请待处理，审批通过前不会生效。
+      </div>
+      <a class="btn btn-sm btn-warning" href="{{ url_for('main.approvals_list') }}">去处理</a>
+      <button type="button" class="btn-close ms-2" data-bs-dismiss="alert" aria-label="关闭"></button>
+    </div>
+  {% endif %}
+
   <div class="row g-3 mb-4">
     <div class="col-md-3">
       <div class="card stat-card stat-card-income">
         <div class="card-body">
           <i class="bi bi-graph-up-arrow stat-icon"></i>
           <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing: 0.5px;">入账（已到账）</div>
-          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format(income_cents/100) }}</div>
+          <div class="fs-3 fw-bold">¥ {{ income_cents|money }}</div>
         </div>
       </div>
     </div>
@@ -27,7 +37,7 @@
         <div class="card-body">
           <i class="bi bi-graph-down-arrow stat-icon"></i>
           <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing: 0.5px;">出账（已付款）</div>
-          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format(expense_cents/100) }}</div>
+          <div class="fs-3 fw-bold">¥ {{ expense_cents|money }}</div>
         </div>
       </div>
     </div>
@@ -36,7 +46,7 @@
         <div class="card-body">
           <i class="bi bi-cash-stack stat-icon"></i>
           <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing: 0.5px;">可分配盈余</div>
-          <div class="fs-3 fw-bold">¥ {{ '%.2f'|format((surplus_cents or 0)/100) }}</div>
+          <div class="fs-3 fw-bold">¥ {{ (surplus_cents or 0)|money }}</div>
           <div class="small text-muted mt-1">全部项目利润（不含分红支出）</div>
         </div>
       </div>
@@ -111,10 +121,10 @@
                 <span class="fw-semibold">{{ row.project.name }}</span>
                 {% if row.project.sub_projects %}<span class="badge text-bg-secondary ms-1" style="font-size:.65rem;">父项目</span>{% endif %}
               </td>
-              <td class="text-end">¥ {{ '%.2f'|format(row.expected_net_cents/100) }}</td>
-              <td class="text-end">¥ {{ '%.2f'|format(row.received_cents/100) }}</td>
-              <td class="text-end">¥ {{ '%.2f'|format(row.received_net_cents/100) }}</td>
-              <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ '%.2f'|format(row.remaining_net_cents/100) }}</td>
+              <td class="text-end">¥ {{ row.expected_net_cents|money }}</td>
+              <td class="text-end">¥ {{ row.received_cents|money }}</td>
+              <td class="text-end">¥ {{ row.received_net_cents|money }}</td>
+              <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ row.remaining_net_cents|money }}</td>
               <td>
                 {% if row.project.sub_projects %}
                   <span class="small text-muted">含子项目</span>
@@ -142,10 +152,10 @@
                   <span class="text-muted" style="font-size:.8rem;">└ </span>{{ child.project.name }}
                   {% if not child.project.can_dividend %}<span class="badge text-bg-warning ms-1" style="font-size:.6rem;">不可分红</span>{% endif %}
                 </td>
-                <td class="text-end small">¥ {{ '%.2f'|format(child.expected_net_cents/100) }}</td>
-                <td class="text-end small">¥ {{ '%.2f'|format(child.received_cents/100) }}</td>
-                <td class="text-end small">¥ {{ '%.2f'|format(child.received_net_cents/100) }}</td>
-                <td class="text-end small fw-bold text-danger">¥ {{ '%.2f'|format(child.remaining_net_cents/100) }}</td>
+                <td class="text-end small">¥ {{ child.expected_net_cents|money }}</td>
+                <td class="text-end small">¥ {{ child.received_cents|money }}</td>
+                <td class="text-end small">¥ {{ child.received_net_cents|money }}</td>
+                <td class="text-end small fw-bold text-danger">¥ {{ child.remaining_net_cents|money }}</td>
                 <td>
                   <div class="d-flex align-items-center gap-2">
                     <div class="progress flex-grow-1" style="height: 6px;">
@@ -199,31 +209,31 @@
             <div class="col-md-2">
               <div class="border rounded p-2 text-center">
                 <div class="text-muted small">总收入</div>
-                <div class="fw-semibold">¥ {{ '%.2f'|format(ended_total_income/100) }}</div>
+                <div class="fw-semibold">¥ {{ ended_total_income|money }}</div>
               </div>
             </div>
             <div class="col-md-2">
               <div class="border rounded p-2 text-center">
                 <div class="text-muted small">总支出</div>
-                <div class="fw-semibold">¥ {{ '%.2f'|format(ended_total_expense/100) }}</div>
+                <div class="fw-semibold">¥ {{ ended_total_expense|money }}</div>
               </div>
             </div>
             <div class="col-md-2">
               <div class="border rounded p-2 text-center">
                 <div class="text-muted small">总利润</div>
-                <div class="fw-semibold {% if ended_total_profit >= 0 %}text-success{% else %}text-danger{% endif %}">¥ {{ '%.2f'|format(ended_total_profit/100) }}</div>
+                <div class="fw-semibold {% if ended_total_profit >= 0 %}text-success{% else %}text-danger{% endif %}">¥ {{ ended_total_profit|money }}</div>
               </div>
             </div>
             <div class="col-md-3">
               <div class="border rounded p-2 text-center">
                 <div class="text-muted small">已分红</div>
-                <div class="fw-semibold">¥ {{ '%.2f'|format(ended_total_div_paid/100) }}</div>
+                <div class="fw-semibold">¥ {{ ended_total_div_paid|money }}</div>
               </div>
             </div>
             <div class="col-md-3">
               <div class="border rounded p-2 text-center">
                 <div class="text-muted small">未分红</div>
-                <div class="fw-semibold text-{% if ended_total_div_remaining > 0 %}danger{% else %}success{% endif %}">¥ {{ '%.2f'|format(ended_total_div_remaining/100) }}</div>
+                <div class="fw-semibold text-{% if ended_total_div_remaining > 0 %}danger{% else %}success{% endif %}">¥ {{ ended_total_div_remaining|money }}</div>
               </div>
             </div>
           </div>
@@ -249,14 +259,14 @@
                         <span class="badge text-bg-warning ms-1">未分红</span>
                       {% endif %}
                     </td>
-                    <td class="text-end">¥ {{ '%.2f'|format(row.received_net_cents/100) }}</td>
-                    <td class="text-end">¥ {{ '%.2f'|format(row.dividend_paid/100) }}</td>
+                    <td class="text-end">¥ {{ row.received_net_cents|money }}</td>
+                    <td class="text-end">¥ {{ row.dividend_paid|money }}</td>
                     <td class="text-end fw-bold {% if has_remaining %}text-danger{% else %}text-success{% endif %}">
-                      ¥ {{ '%.2f'|format(row.dividend_remaining/100) }}
+                      ¥ {{ row.dividend_remaining|money }}
                     </td>
                     <td class="text-end">
-                      <a class="btn btn-sm {% if has_remaining and is_admin %}btn-success{% else %}btn-outline-secondary{% endif %}" href="{% if has_remaining and is_admin %}{{ url_for('main.project_dividend_page', project_id=row.project.id) }}{% else %}{{ url_for('main.project_detail', project_id=row.project.id) }}{% endif %}">
-                        {% if has_remaining and is_admin %}分红{% else %}查看{% endif %}
+                      <a class="btn btn-sm {% if has_remaining %}btn-success{% else %}btn-outline-secondary{% endif %}" href="{% if has_remaining %}{{ url_for('main.project_dividend_page', project_id=row.project.id) }}{% else %}{{ url_for('main.project_detail', project_id=row.project.id) }}{% endif %}">
+                        {% if has_remaining %}分红{% else %}查看{% endif %}
                       </a>
                     </td>
                   </tr>

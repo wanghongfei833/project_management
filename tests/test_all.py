@@ -56,6 +56,12 @@ def app():
 
 @pytest.fixture
 def client(app):
+    # app fixture 里的 app_context 是 session 级的，Flask 会在请求中复用它，
+    # 而 flask_login 把当前用户缓存在 g._login_user 上。不清理的话，
+    # 上一个用例登录的账号会「粘」到后面的用例（登出、切换账号全都会失效）。
+    from flask import g as _flask_g
+
+    _flask_g.pop("_login_user", None)
     return app.test_client()
 
 
@@ -311,10 +317,16 @@ class TestEndRevive:
         rv = client.post(f"/projects/{seed['projects']['A1']}/end-approve", follow_redirects=True)
 
     def test_revive_project(self, client):
-        login(client, "admin", "admin123!")
         seed = get_seed()
+        # A1 的成员发起复活申请，另一位成员同意后自动执行
+        # （admin 不是 A1 成员，发起/审批都要求项目成员身份）
+        login(client, "hu")
         client.post(f"/projects/{seed['projects']['A1']}/revive-request")
-        rv = client.post(f"/projects/{seed['projects']['A1']}/revive-approve", follow_redirects=True)
+        client.post("/logout")
+        login(client, "wai1")
+        client.post(
+            f"/projects/{seed['projects']['A1']}/revive-approve", follow_redirects=True
+        )
         p = _db.session.get(Project, seed["projects"]["A1"])
         assert p.status == "open"
 
@@ -585,3 +597,114 @@ class TestFinanceCalculation:
         # 提交后应看到成功提示
         assert rv.status_code == 200
 
+
+class TestPendingApprovals:
+    """「待我处理」：登录弹窗 + 铃铛待办 + 待办页一键同意。"""
+
+    @staticmethod
+    def _switch_user(client, username, password="123456!"):
+        """切换账号（login 视图对已登录用户会直接跳首页，必须先登出）。"""
+        client.post("/logout")
+        return login(client, username, password)
+
+    def _fresh_project(self, name):
+        """建一个只有 wang / si 两个非管理员成员的项目，避免与其他用例互相干扰。"""
+        seed = get_seed()
+        p = Project.query.filter_by(name=name).first()
+        if p:
+            return p
+        p = Project(
+            name=name,
+            expected_income_cents=0,
+            broker_fee_mode="percent",
+            broker_fee_direction="we_pay_separate",
+            referral_ratio=Decimal("0"),
+            status="open",
+            can_dividend=True,
+            leader_user_id=seed["users"]["wang"],
+            planned_start_date=date(2026, 1, 1),
+            planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        for uname in ["admin", "wang", "si"]:
+            _db.session.add(ProjectMember(project_id=p.id, user_id=seed["users"][uname]))
+        _db.session.commit()
+        return p
+
+    def test_login_popup_and_todo_list(self, client):
+        p = self._fresh_project("ProjTodo")
+
+        # A（wang）发起一笔流水申请
+        login(client, "wang")
+        client.post("/transactions/new", data={
+            "project_id": p.id, "type": "expense",
+            "amount_yuan": "1234.56", "occur_date": date.today().isoformat(),
+            "settled": 1, "counterparty": "supplier", "note": "待办用例",
+        })
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, status="pending")
+            .order_by(Transaction.id.desc())
+            .first()
+        )
+        assert tx is not None
+
+        # 发起人自己不算待办（发起时自动记了一条同意）
+        html = client.get("/approvals").data.decode("utf-8")
+        assert "ProjTodo" in html
+        assert "我已同意，等待其他人" in html
+
+        # B（si）登录：登录后第一次打开页面弹窗，第二次不再弹
+        rv = self._switch_user(client, "si")
+        first_html = rv.data.decode("utf-8")
+        assert "pendingApprovalModal" in first_html
+        assert "ProjTodo" in first_html
+        assert f"/transactions/{tx.id}/create-approve" in first_html
+
+        second_html = client.get("/").data.decode("utf-8")
+        assert "pendingApprovalModal" not in second_html
+        # 铃铛常驻显示待办数
+        assert "待办" in second_html
+
+        # 非成员（zhuo）看不到这个项目的待办
+        self._switch_user(client, "zhuo")
+        html = client.get("/approvals").data.decode("utf-8")
+        assert "ProjTodo" not in html
+
+        # B 在待办页一键同意 → 回到待办页，且申请自动生效
+        self._switch_user(client, "si")
+        rv = client.post(
+            f"/transactions/{tx.id}/create-approve",
+            data={"next": "/approvals"},
+            follow_redirects=False,
+        )
+        assert rv.status_code in (301, 302, 303)
+        assert rv.headers.get("Location") == "/approvals"
+        _db.session.refresh(tx)
+        assert tx.status == "active"
+
+        html = client.get("/approvals").data.decode("utf-8")
+        assert "ProjTodo" not in html
+
+    def test_project_end_request_notifies_other_member(self, client):
+        p = self._fresh_project("ProjTodoEnd")
+
+        # A（wang）发起项目终止申请
+        login(client, "wang")
+        client.post(f"/projects/{p.id}/end-request")
+        _db.session.refresh(p)
+        assert p.status == "open"
+
+        # B（si）登录即可看到「项目终止」待办
+        html = self._switch_user(client, "si").data.decode("utf-8")
+        assert "项目终止" in html
+        assert "ProjTodoEnd" in html
+
+        # B 同意后自动执行终止
+        client.post(
+            f"/projects/{p.id}/end-approve",
+            data={"next": "/approvals"},
+            follow_redirects=True,
+        )
+        _db.session.refresh(p)
+        assert p.status == "ended"

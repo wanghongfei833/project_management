@@ -58,3 +58,10 @@ admin_账号密码.txt
 # ===== Tool / IDE config =====
 .reasonix/
 .codegraph/
+# 本机的 AI 助手工具配置（含本机路径/命令白名单，不入库）
+reasonix.toml
+
+# ===== 本地数据同步产物 =====
+_local_backup/
+_aliyun_data/
+_aliyun_snapshot/

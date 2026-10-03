@@ -1,0 +1,27 @@
+{# 待办条目列表；调用方需要先定义 items（PendingItem 列表） #}
+{% for item in items %}
+  <div class="list-group-item d-flex justify-content-between align-items-start gap-2 py-2">
+    <div class="flex-grow-1">
+      <div class="d-flex align-items-center flex-wrap gap-2">
+        <span class="badge text-bg-secondary">{{ item.label }}</span>
+        <a class="fw-semibold text-decoration-none" href="{{ item.detail_url }}">{{ item.project_name }}</a>
+      </div>
+      <div class="small mt-1">{{ item.summary }}</div>
+      <div class="text-muted" style="font-size:.75rem;">
+        {{ item.requester }} 发起{% if item.created_at %} · {{ item.created_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+        {%- if item.required_count %} · 已同意 {{ item.approved_count }}/{{ item.required_count }}{% endif %}
+      </div>
+    </div>
+    <div class="flex-shrink-0">
+      {% if item.approved_by_me %}
+        <span class="badge text-bg-light border text-muted">我已同意</span>
+      {% else %}
+        <form method="post" action="{{ item.approve_url }}" class="mb-0">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="next" value="{{ url_for('main.approvals_list') }}">
+          <button type="submit" class="btn btn-sm btn-success">同意</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}

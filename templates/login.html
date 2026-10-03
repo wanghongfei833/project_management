@@ -23,7 +23,14 @@
       .login-header h1 { color: #fff; font-size: 1.3rem; font-weight: 700; margin: 0; }
       .login-header .subtitle { color: rgba(255,255,255,0.7); font-size: 0.85rem; margin-top: 0.3rem; }
       .login-body { padding: 2rem; background: #fff; }
-      .login-body .form-control { border-radius: 8px; padding: 0.7rem 1rem; }
+      .login-body .form-control {
+        border-radius: 8px; padding: 0.7rem 1rem;
+        border: 1px solid #8f99a3;
+      }
+      .login-body .form-control:focus {
+        border-color: #1a3a5c; box-shadow: 0 0 0 3px rgba(26,58,92,0.14);
+      }
+      .login-body .input-group-text { border: 1px solid #8f99a3; background: #f8f9fa; color: #495057; }
       .login-body .btn-primary {
         background: linear-gradient(135deg, #1a3a5c, #2d5a87);
         border: none; border-radius: 8px; padding: 0.7rem; font-weight: 600;
