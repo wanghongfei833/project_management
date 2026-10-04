@@ -12,7 +12,14 @@ from wtforms import (
     StringField,
     TextAreaField,
 )
-from wtforms.validators import DataRequired, EqualTo, Length, NumberRange, Optional
+from wtforms.validators import (
+    DataRequired,
+    EqualTo,
+    Length,
+    NumberRange,
+    Optional,
+    ValidationError,
+)
 from wtforms import SelectMultipleField
 
 from .project_finance import (
@@ -21,6 +28,13 @@ from .project_finance import (
     BROKER_MODE_FIXED,
     BROKER_MODE_PERCENT,
 )
+from .sms import normalize_phone, is_valid_phone
+
+
+def phone_validator(form, field):
+    """校验手机号（允许 +86/空格/横线，存库前统一成 11 位数字）。"""
+    if not is_valid_phone(field.data):
+        raise ValidationError("请输入正确的 11 位手机号")
 
 
 class LoginForm(FlaskForm):
@@ -177,6 +191,11 @@ class ProjectAdjustmentForm(FlaskForm):
 
 class UserCreateForm(FlaskForm):
     username = StringField("用户名", validators=[DataRequired(), Length(min=2, max=64)])
+    phone = StringField(
+        "手机号",
+        validators=[DataRequired(message="请填写手机号"), phone_validator],
+        render_kw={"placeholder": "11 位手机号，用于待办短信提醒"},
+    )
     role = SelectField(
         "角色",
         choices=[("viewer", "只读"), ("admin", "管理员")],
@@ -190,6 +209,11 @@ class UserCreateForm(FlaskForm):
 
 
 class UserEditForm(FlaskForm):
+    phone = StringField(
+        "手机号",
+        validators=[DataRequired(message="请填写手机号"), phone_validator],
+        render_kw={"placeholder": "11 位手机号，用于待办短信提醒"},
+    )
     role = SelectField(
         "角色",
         choices=[("viewer", "只读"), ("admin", "管理员")],
@@ -205,4 +229,3 @@ class ChangePasswordForm(FlaskForm):
         "确认新密码",
         validators=[DataRequired(), EqualTo("new_password", message="两次输入的新密码不一致")],
     )
-

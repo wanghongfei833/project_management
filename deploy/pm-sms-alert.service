@@ -1,0 +1,26 @@
+# 待办超时短信提醒：由 pm-sms-alert.timer 每 30 分钟拉起一次
+# 安装：
+#   cp deploy/pm-sms-alert.service /etc/systemd/system/
+#   cp deploy/pm-sms-alert.timer   /etc/systemd/system/
+#   cp deploy/sms.env.example /root/project/PM/.env.sms && chmod 600 /root/project/PM/.env.sms
+#   vi /root/project/PM/.env.sms        # 填阿里云密钥与签名
+#   systemctl daemon-reload && systemctl enable --now pm-sms-alert.timer
+[Unit]
+Description=PM Ledger pending-approval SMS alert
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/project/PM
+
+Environment="URL_PREFIX=/PM"
+Environment="DATABASE_URL=sqlite:////root/project/PM/instance/ledger.db"
+Environment="UPLOAD_FOLDER=/root/project/PM/uploads"
+Environment="PATH=/root/miniconda3/envs/TIE/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# 阿里云短信密钥/签名（不入库，权限 600）
+EnvironmentFile=-/root/project/PM/.env.sms
+
+ExecStart=/root/miniconda3/envs/TIE/bin/python /root/project/PM/scripts/send_pending_sms.py

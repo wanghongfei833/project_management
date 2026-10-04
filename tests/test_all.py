@@ -5,7 +5,7 @@
 import pytest, os, sys
 from pathlib import Path
 from decimal import Decimal
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 def _utcnow():
     """兼容 Python 3.12+ 的当前 UTC 时间。"""
@@ -30,8 +30,11 @@ from ledger_app.models import (
     ProjectExpectedIncomeAdjustment, ProjectDividendDistribution,
     ProjectEndRequest, ProjectEndApproval, ProjectReviveRequest, ProjectReviveApproval,
     ProjectDeleteRequest, ProjectDeleteApproval, ProjectActivityLog, Attachment,
+    SmsNotification, SmsNotificationProject,
 )
 from ledger_app.project_finance import build_project_finance
+from ledger_app.sms import render_pending_text
+from ledger_app.sms_alerts import build_alert_plans, send_pending_alerts
 
 
 @pytest.fixture(scope="session")
@@ -708,3 +711,257 @@ class TestPendingApprovals:
         )
         _db.session.refresh(p)
         assert p.status == "ended"
+
+
+class TestPhoneAndSms:
+    """手机号录入 + 待办超时短信提醒 + 短信溯源。"""
+
+    @staticmethod
+    def _fake_sender(ok=True, biz_id="B-TEST"):
+        calls = []
+
+        def _send(phone, number, **kwargs):
+            calls.append((phone, number))
+            return {
+                "ok": ok,
+                "code": "OK" if ok else "isv.BUSINESS_LIMIT_CONTROL",
+                "message": "OK" if ok else "触发流控",
+                "request_id": "R-TEST",
+                "biz_id": biz_id if ok else "",
+                "content": render_pending_text(number),
+                "configured": True,
+                "template_code": "SMS_512630691",
+                "phone": phone,
+            }
+
+        return _send, calls
+
+    def _fresh_project(self, name, members):
+        seed = get_seed()
+        p = Project.query.filter_by(name=name).first()
+        if p:
+            return p
+        p = Project(
+            name=name,
+            expected_income_cents=0,
+            broker_fee_mode="percent",
+            broker_fee_direction="we_pay_separate",
+            referral_ratio=Decimal("0"),
+            status="open",
+            can_dividend=True,
+            leader_user_id=seed["users"][members[0]],
+            planned_start_date=date(2026, 1, 1),
+            planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        for uname in ["admin", *members]:
+            _db.session.add(ProjectMember(project_id=p.id, user_id=seed["users"][uname]))
+        _db.session.commit()
+        return p
+
+    @staticmethod
+    def _enable_sms(monkeypatch):
+        """让 sms_configured() 返回 True（发送本身会被 monkeypatch 掉）。"""
+        monkeypatch.setenv("ALIYUN_SMS_ACCESS_KEY_ID", "test-key-id")
+        monkeypatch.setenv("ALIYUN_SMS_ACCESS_KEY_SECRET", "test-key-secret")
+        monkeypatch.setenv("ALIYUN_SMS_SIGN_NAME", "测试签名")
+        monkeypatch.setenv("ALIYUN_SMS_TEMPLATE_CODE", "SMS_512630691")
+
+    def _make_pending_item(self, project_id, requester_id, hours_old=7):
+        tx = Transaction(
+            project_id=project_id, status="pending", type="income",
+            amount_cents=100000, occur_date=date.today(), settled=True,
+            counterparty="client", created_by_user_id=requester_id,
+        )
+        _db.session.add(tx)
+        _db.session.flush()
+        req = TransactionCreateRequest(
+            transaction_id=tx.id, project_id=project_id, status="open",
+            created_by_user_id=requester_id,
+        )
+        _db.session.add(req)
+        _db.session.flush()
+        _db.session.add(TransactionCreateApproval(request_id=req.id, user_id=requester_id))
+        req.created_at = _utcnow() - timedelta(hours=hours_old)
+        _db.session.commit()
+        return tx, req
+
+    # ── 手机号录入 ────────────────────────────────────────────
+    def test_create_user_requires_phone(self, client):
+        login(client, "admin", "admin123!")
+        base = {"username": "phoneless", "role": "viewer", "is_active": 1, "password": "abc123!"}
+
+        # 不填手机号 → 不创建
+        rv = client.post("/users/new", data=dict(base), follow_redirects=True)
+        assert rv.status_code == 200
+        assert User.query.filter_by(username="phoneless").first() is None
+
+        # 号码不合法 → 不创建
+        rv = client.post("/users/new", data=dict(base, phone="12345"), follow_redirects=True)
+        assert User.query.filter_by(username="phoneless").first() is None
+
+        # 正常号码（带空格/+86 也能识别）→ 存成 11 位数字
+        rv = client.post(
+            "/users/new", data=dict(base, phone="+86 138 0000 0003"), follow_redirects=True
+        )
+        u = User.query.filter_by(username="phoneless").first()
+        assert u is not None and u.phone == "13800000003"
+
+        # 号码重复 → 拒绝
+        rv = client.post(
+            "/users/new",
+            data=dict(base, username="phoneless2", phone="13800000003"),
+            follow_redirects=True,
+        )
+        assert User.query.filter_by(username="phoneless2").first() is None
+
+    def test_edit_user_backfills_phone(self, client):
+        login(client, "admin", "admin123!")
+        seed = get_seed()
+        hu = _db.session.get(User, seed["users"]["hu"])
+        rv = client.post(
+            f"/users/{hu.id}/edit",
+            data={"phone": "13900000001", "role": hu.role, "is_active": 1},
+            follow_redirects=True,
+        )
+        assert rv.status_code == 200
+        _db.session.refresh(hu)
+        assert hu.phone == "13900000001"
+
+        # 别人已用的号码 → 拒绝
+        zhuo = _db.session.get(User, seed["users"]["zhuo"])
+        client.post(
+            f"/users/{zhuo.id}/edit",
+            data={"phone": "13900000001", "role": zhuo.role, "is_active": 1},
+            follow_redirects=True,
+        )
+        _db.session.refresh(zhuo)
+        assert not zhuo.phone
+
+    # ── 提醒判定 ──────────────────────────────────────────────
+    def test_alert_skips_without_phone_and_before_6h(self, client, monkeypatch):
+        seed = get_seed()
+        p = self._fresh_project("ProjSmsSkip", ["wang", "si"])
+        wang = _db.session.get(User, seed["users"]["wang"])
+        si = _db.session.get(User, seed["users"]["si"])
+        # si 没有手机号
+        si.phone = None
+        _db.session.commit()
+
+        self._make_pending_item(p.id, wang.id, hours_old=7)
+        plans, skipped = build_alert_plans(user_id=si.id)
+        assert plans == []
+        assert skipped["no_phone"] == 1
+
+        # 补上号码，但申请只积压 2 小时 → 还不提醒
+        si.phone = "13800000002"
+        _db.session.commit()
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, status="pending")
+            .order_by(Transaction.id.desc())
+            .first()
+        )
+        req = TransactionCreateRequest.query.filter_by(transaction_id=tx.id).first()
+        req.created_at = _utcnow() - timedelta(hours=2)
+        _db.session.commit()
+        plans, skipped = build_alert_plans(user_id=si.id)
+        assert plans == []
+        assert skipped["not_overdue"] == 1
+
+    def test_send_alerts_records_and_cools_down(self, client, monkeypatch):
+        self._enable_sms(monkeypatch)
+        seed = get_seed()
+        p = self._fresh_project("ProjSmsSend", ["wang", "si"])
+        wang = _db.session.get(User, seed["users"]["wang"])
+        si = _db.session.get(User, seed["users"]["si"])
+        si.phone = "13800000002"
+        _db.session.commit()
+        self._make_pending_item(p.id, wang.id, hours_old=7)
+
+        sender, calls = self._fake_sender()
+        monkeypatch.setattr("ledger_app.sms_alerts.send_sms", sender)
+
+        # 只要 si 的人均待办数：应包含本项目的那 1 条
+        plans, _ = build_alert_plans(user_id=si.id)
+        assert len(plans) == 1
+        assert plans[0].overdue_count >= 1
+        assert any(pid == p.id for pid, _name, _cnt in plans[0].projects)
+        expected_count = plans[0].pending_count
+
+        res = send_pending_alerts(user_id=si.id)
+        assert res["sent"] == 1 and res["failed"] == 0
+        assert calls == [("13800000002", expected_count)]
+
+        rec = (
+            SmsNotification.query.filter_by(user_id=si.id, trigger="auto")
+            .order_by(SmsNotification.id.desc())
+            .first()
+        )
+        assert rec is not None and rec.status == "sent"
+        assert rec.phone == "13800000002"
+        assert rec.pending_count == expected_count
+        assert rec.content == render_pending_text(expected_count)
+        assert rec.request_id == "B-TEST"
+        # 项目拆分：能查到「某个项目给谁发过多少条」
+        assert any(sp.project_id == p.id and sp.item_count >= 1 for sp in rec.projects)
+
+        # 6 小时冷却
+        res2 = send_pending_alerts(user_id=si.id)
+        assert res2["sent"] == 0 and res2["skipped"]["cooling"] == 1
+        # force 可以忽略冷却
+        res3 = send_pending_alerts(user_id=si.id, force=True)
+        assert res3["sent"] == 1
+
+    def test_send_failure_is_recorded(self, client, monkeypatch):
+        self._enable_sms(monkeypatch)
+        seed = get_seed()
+        p = self._fresh_project("ProjSmsFail", ["wang", "si"])
+        wang = _db.session.get(User, seed["users"]["wang"])
+        si = _db.session.get(User, seed["users"]["si"])
+        si.phone = "13800000002"
+        _db.session.commit()
+        self._make_pending_item(p.id, wang.id, hours_old=8)
+
+        sender, _calls = self._fake_sender(ok=False)
+        monkeypatch.setattr("ledger_app.sms_alerts.send_sms", sender)
+        res = send_pending_alerts(user_id=si.id, force=True)
+        assert res["sent"] == 0 and res["failed"] == 1
+        rec = (
+            SmsNotification.query.filter_by(user_id=si.id, status="failed")
+            .order_by(SmsNotification.id.desc())
+            .first()
+        )
+        assert rec is not None and "BUSINESS_LIMIT_CONTROL" in (rec.error or "")
+
+    # ── 管理页 ────────────────────────────────────────────────
+    def test_sms_page_and_test_send(self, client, monkeypatch):
+        self._enable_sms(monkeypatch)
+        seed = get_seed()
+        wang = _db.session.get(User, seed["users"]["wang"])
+
+        login(client, "wang")
+        rv = client.get("/admin/sms")
+        assert rv.status_code in (301, 302, 303)  # 非管理员拿不到
+
+        client.post("/logout")
+        login(client, "admin", "admin123!")
+        rv = client.get("/admin/sms")
+        assert rv.status_code == 200
+        assert "短信提醒" in rv.data.decode("utf-8")
+
+        sender, calls = self._fake_sender()
+        monkeypatch.setattr("ledger_app.sms_alerts.send_sms", sender)
+        rv = client.post(
+            "/admin/sms/test",
+            data={"phone": "13800000009", "number": 2, "next": "/admin/sms"},
+            follow_redirects=True,
+        )
+        assert rv.status_code == 200
+        assert calls == [("13800000009", 2)]
+        rec = (
+            SmsNotification.query.filter_by(trigger="test")
+            .order_by(SmsNotification.id.desc())
+            .first()
+        )
+        assert rec is not None and rec.status == "sent" and rec.pending_count == 2

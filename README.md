@@ -71,6 +71,13 @@
 
 > 审批口径不变：项目非管理员成员全部同意，或任一管理员同意，申请即自动执行。
 
+### 📱 手机号与短信提醒
+- 新增用户必须填手机号；老用户在「用户管理 → 编辑」里补录（列表页会标「未填写」）
+- 待办积压超过 **6 小时**后，给还没处理的人发短信，之后**每 6 小时再发一条**
+- 短信按人聚合，正文 `${number}` 为该人当前待处理条数（模板 `SMS_512630691`）
+- 管理员「短信」页可溯源：按项目统计发了多少条、发给了谁、成功/失败明细
+- 服务器上由 `pm-sms-alert.timer` 每 30 分钟检查一次，配置见 [docs/sms-alerts.md](docs/sms-alerts.md)
+
 ### 👥 权限体系
 | 角色 | 权限 |
 |---|---|
@@ -190,6 +197,11 @@ project_management/
 | `DATABASE_URL` | 数据库连接串 | `sqlite:///ledger.db` |
 | `UPLOAD_FOLDER` | 附件上传目录 | `./uploads` |
 | `URL_PREFIX` | 子路径部署前缀 | 空（如 `/PM`） |
+| `ALIYUN_SMS_ACCESS_KEY_ID` | 阿里云短信 AccessKeyId（未设置则不发短信） | 空 |
+| `ALIYUN_SMS_ACCESS_KEY_SECRET` | 阿里云短信 AccessKeySecret | 空 |
+| `ALIYUN_SMS_SIGN_NAME` | 短信签名名称（控制台已审核通过） | 空 |
+| `ALIYUN_SMS_TEMPLATE_CODE` | 短信模板 CODE | `SMS_512630691` |
+| `ALIYUN_SMS_REGION` | 短信接口区域 | `cn-hangzhou` |
 
 ## 金额单位
 

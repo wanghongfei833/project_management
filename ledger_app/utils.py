@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import BinaryIO
@@ -16,6 +17,16 @@ def format_cents(cents) -> str:
     except (TypeError, ValueError):
         return "0.00"
     return f"{value:,.2f}"
+
+
+def format_dt_local(value) -> str:
+    """库里存的是 naive UTC，这里转成东八区字符串（仅用于界面展示）。"""
+    if not value:
+        return "—"
+    try:
+        return (value + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+    except TypeError:
+        return str(value)
 
 
 def sha256_file(f: BinaryIO) -> str:
@@ -34,4 +45,3 @@ def safe_join_upload(base_dir: str, filename: str) -> str:
     if base not in p.parents and base != p:
         raise ValueError("invalid upload path")
     return str(p)
-

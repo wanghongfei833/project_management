@@ -15,6 +15,7 @@
         <tr>
           <th>ID</th>
           <th>用户名</th>
+          <th>手机号</th>
           <th>角色</th>
           <th>状态</th>
           <th class="text-end">操作</th>
@@ -25,6 +26,13 @@
           <tr>
             <td class="text-muted">{{ u.id }}</td>
             <td class="fw-semibold">{{ u.username }}</td>
+            <td>
+              {% if u.phone %}
+                <span class="font-monospace small">{{ u.phone }}</span>
+              {% else %}
+                <span class="badge text-bg-warning">未填写</span>
+              {% endif %}
+            </td>
             <td>
               {% if u.role == 'admin' %}
                 <span class="badge text-bg-danger">管理员</span>
@@ -52,7 +60,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="5" class="text-muted">暂无用户</td></tr>
+          <tr><td colspan="6" class="text-muted">暂无用户</td></tr>
         {% endfor %}
       </tbody>
     </table>

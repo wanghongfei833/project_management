@@ -716,5 +716,73 @@ def ensure_sqlite_schema():
             text("ALTER TABLE project_updates ADD COLUMN title VARCHAR(256)")
         )
 
-    db.session.commit()
+    # Add phone to users（待办超时短信提醒用）
+    if _table_exists("users") and not _column_exists("users", "phone"):
+        db.session.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(32)"))
 
+    # 短信发送记录
+    if not _table_exists("sms_notifications"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE sms_notifications (
+                  id INTEGER PRIMARY KEY,
+                  user_id INTEGER,
+                  username VARCHAR(64),
+                  phone VARCHAR(32) NOT NULL,
+                  pending_count INTEGER NOT NULL DEFAULT 0,
+                  content TEXT,
+                  status VARCHAR(16) NOT NULL DEFAULT 'sent',
+                  provider VARCHAR(32) NOT NULL DEFAULT 'aliyun',
+                  template_code VARCHAR(64),
+                  request_id VARCHAR(64),
+                  error TEXT,
+                  trigger VARCHAR(16) NOT NULL DEFAULT 'auto',
+                  created_at DATETIME NOT NULL,
+                  FOREIGN KEY(user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text("CREATE INDEX ix_sms_notifications_user_id ON sms_notifications (user_id)")
+        )
+        db.session.execute(
+            text("CREATE INDEX ix_sms_notifications_status ON sms_notifications (status)")
+        )
+        db.session.execute(
+            text("CREATE INDEX ix_sms_notifications_trigger ON sms_notifications (trigger)")
+        )
+        db.session.execute(
+            text("CREATE INDEX ix_sms_notifications_created_at ON sms_notifications (created_at)")
+        )
+
+    if not _table_exists("sms_notification_projects"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE sms_notification_projects (
+                  id INTEGER PRIMARY KEY,
+                  notification_id INTEGER NOT NULL,
+                  project_id INTEGER,
+                  project_name VARCHAR(256),
+                  item_count INTEGER NOT NULL DEFAULT 0,
+                  FOREIGN KEY(notification_id) REFERENCES sms_notifications(id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_sms_notification_projects_notification_id "
+                "ON sms_notification_projects (notification_id)"
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_sms_notification_projects_project_id "
+                "ON sms_notification_projects (project_id)"
+            )
+        )
+
+    db.session.commit()

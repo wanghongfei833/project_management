@@ -44,6 +44,14 @@ from .models import (
 from .utils import format_cents
 
 
+def _url(endpoint: str, **values) -> str:
+    """生成站内链接；定时任务等无请求上下文时返回空串（短信正文里用不到链接）。"""
+    try:
+        return url_for(endpoint, **values)
+    except RuntimeError:
+        return ""
+
+
 @dataclass(frozen=True)
 class PendingItem:
     kind: str
@@ -164,10 +172,10 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     created_at=req.created_at,
-                    approve_url=url_for(
+                    approve_url=_url(
                         "main.transactions_create_approve", transaction_id=tx.id
                     ),
-                    detail_url=url_for("main.project_detail", project_id=project.id),
+                    detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
                     approved_count=len(approved),
                     required_count=counts.get(int(project.id), 0),
@@ -208,10 +216,10 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     created_at=req.created_at,
-                    approve_url=url_for(
+                    approve_url=_url(
                         "main.transactions_edit_approve", transaction_id=tx.id
                     ),
-                    detail_url=url_for("main.project_detail", project_id=project.id),
+                    detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
                     approved_count=len(approved),
                     required_count=counts.get(int(project.id), 0),
@@ -250,10 +258,10 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     created_at=req.created_at,
-                    approve_url=url_for(
+                    approve_url=_url(
                         "main.transactions_delete_approve", transaction_id=tx.id
                     ),
-                    detail_url=url_for("main.project_detail", project_id=project.id),
+                    detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
                     approved_count=len(approved),
                     required_count=counts.get(int(project.id), 0),
@@ -286,12 +294,12 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     summary=f"追加 ¥{format_cents(adj.amount_cents)}{note}",
                     requester=names.get(int(adj.created_by_user_id or 0), "—"),
                     created_at=adj.created_at,
-                    approve_url=url_for(
+                    approve_url=_url(
                         "main.project_adjust_approve",
                         project_id=project.id,
                         adjustment_id=adj.id,
                     ),
-                    detail_url=url_for("main.project_detail", project_id=project.id),
+                    detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
                     approved_count=len(approved),
                     required_count=counts.get(int(project.id), 0),
@@ -323,10 +331,10 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     summary="终止项目，通过后冻结为只读",
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     created_at=req.created_at,
-                    approve_url=url_for(
+                    approve_url=_url(
                         "main.project_end_approve", project_id=project.id
                     ),
-                    detail_url=url_for("main.project_detail", project_id=project.id),
+                    detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
                     approved_count=len(approved),
                     required_count=counts.get(int(project.id), 0),
@@ -358,10 +366,10 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     summary="复活项目，通过后恢复为进行中",
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     created_at=req.created_at,
-                    approve_url=url_for(
+                    approve_url=_url(
                         "main.project_revive_approve", project_id=project.id
                     ),
-                    detail_url=url_for("main.project_detail", project_id=project.id),
+                    detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
                     approved_count=len(approved),
                     required_count=counts.get(int(project.id), 0),
@@ -393,10 +401,10 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     summary="删除项目及其全部流水与凭证（不可恢复）",
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     created_at=req.created_at,
-                    approve_url=url_for(
+                    approve_url=_url(
                         "main.projects_delete_approve", project_id=project.id
                     ),
-                    detail_url=url_for("main.project_detail", project_id=project.id),
+                    detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
                     approved_count=len(approved),
                     required_count=counts.get(int(project.id), 0),
@@ -430,10 +438,10 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     created_at=req.created_at,
-                    approve_url=url_for(
+                    approve_url=_url(
                         "main.project_end_date_change_approve", project_id=project.id
                     ),
-                    detail_url=url_for("main.project_detail", project_id=project.id),
+                    detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
                     approved_count=len(approved),
                     required_count=counts.get(int(project.id), 0),

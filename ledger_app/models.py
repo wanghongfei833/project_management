@@ -20,6 +20,8 @@ class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
+    # 手机号：用于待办超时短信提醒（admin 在用户管理里维护）
+    phone = db.Column(db.String(32), nullable=True)
     role = db.Column(db.String(16), nullable=False, default=Role.VIEWER.value)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -33,6 +35,55 @@ class User(db.Model, UserMixin):
 
     def check_password(self, password: str) -> bool:
         return check_password_hash(self.password_hash, password)
+
+
+class SmsNotification(db.Model):
+    """短信发送记录：按人聚合，一个人一次发送算一条。
+
+    明细拆分见 SmsNotificationProject，用于「某个项目给谁发过多少条短信」的溯源。
+    """
+
+    __tablename__ = "sms_notifications"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
+    username = db.Column(db.String(64), nullable=True)  # 发送时的用户名快照
+    phone = db.Column(db.String(32), nullable=False)  # 发送时的号码快照
+    pending_count = db.Column(db.Integer, nullable=False, default=0)
+    content = db.Column(db.Text, nullable=True)  # 实际发送的短信正文
+    status = db.Column(db.String(16), nullable=False, default="sent", index=True)  # sent/failed/skipped
+    provider = db.Column(db.String(32), nullable=False, default="aliyun")
+    template_code = db.Column(db.String(64), nullable=True)
+    request_id = db.Column(db.String(64), nullable=True)  # 阿里云 BizId
+    error = db.Column(db.Text, nullable=True)
+    trigger = db.Column(db.String(16), nullable=False, default="auto", index=True)  # auto/manual/test
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    user = db.relationship("User", foreign_keys=[user_id])
+    projects = db.relationship(
+        "SmsNotificationProject",
+        back_populates="notification",
+        cascade="all, delete-orphan",
+    )
+
+
+class SmsNotificationProject(db.Model):
+    """一条短信涉及的项目拆分（本项目当时有多少条待办）。"""
+
+    __tablename__ = "sms_notification_projects"
+
+    id = db.Column(db.Integer, primary_key=True)
+    notification_id = db.Column(
+        db.Integer,
+        db.ForeignKey("sms_notifications.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id = db.Column(db.Integer, nullable=True, index=True)
+    project_name = db.Column(db.String(256), nullable=True)
+    item_count = db.Column(db.Integer, nullable=False, default=0)
+
+    notification = db.relationship("SmsNotification", back_populates="projects")
 
 
 @login_manager.user_loader
@@ -587,4 +638,3 @@ class Attachment(db.Model):
     uploaded_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
 
     transaction = db.relationship("Transaction", back_populates="attachments")
-

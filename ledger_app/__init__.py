@@ -79,9 +79,10 @@ def create_app():
     csrf.init_app(app)
 
     # 「分」-> 带千分位的元字符串，模板里用 {{ cents|money }} 展示
-    from .utils import format_cents
+    from .utils import format_cents, format_dt_local
 
     app.jinja_env.filters["money"] = format_cents
+    app.jinja_env.filters["dt"] = format_dt_local
 
     from .routes import bp as main_bp
 
