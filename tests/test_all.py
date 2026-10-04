@@ -965,3 +965,41 @@ class TestPhoneAndSms:
             .first()
         )
         assert rec is not None and rec.status == "sent" and rec.pending_count == 2
+
+
+class TestSchemaBootstrap:
+    """gunicorn 多 worker 并发启动建表时的竞态（table already exists / duplicate column）。"""
+
+    def test_retries_when_table_already_exists(self, app, monkeypatch):
+        from sqlalchemy.exc import OperationalError
+
+        import ledger_app as pkg
+
+        calls = {"n": 0}
+        real_create_all = _db.create_all
+
+        def flaky_create_all(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OperationalError(
+                    "CREATE TABLE sms_notifications",
+                    {},
+                    Exception("table sms_notifications already exists"),
+                )
+            return real_create_all(*args, **kwargs)
+
+        monkeypatch.setattr(_db, "create_all", flaky_create_all)
+        pkg._bootstrap_schema()
+        assert calls["n"] >= 2  # 第一次撞竞态，重试后成功
+
+    def test_other_operational_errors_still_raise(self, app, monkeypatch):
+        from sqlalchemy.exc import OperationalError
+
+        import ledger_app as pkg
+
+        def broken(*args, **kwargs):
+            raise OperationalError("SELECT 1", {}, Exception("disk I/O error"))
+
+        monkeypatch.setattr(_db, "create_all", broken)
+        with pytest.raises(OperationalError):
+            pkg._bootstrap_schema(attempts=2)

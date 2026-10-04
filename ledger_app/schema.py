@@ -737,7 +737,7 @@ def ensure_sqlite_schema():
                   template_code VARCHAR(64),
                   request_id VARCHAR(64),
                   error TEXT,
-                  trigger VARCHAR(16) NOT NULL DEFAULT 'auto',
+                  "trigger" VARCHAR(16) NOT NULL DEFAULT 'auto',
                   created_at DATETIME NOT NULL,
                   FOREIGN KEY(user_id) REFERENCES users(id)
                 )

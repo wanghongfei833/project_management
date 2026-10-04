@@ -1,9 +1,11 @@
 import os
+import time
 from pathlib import Path
 
 from flask import Flask
 from flask_wtf import CSRFProtect
 import sqlite3
+from sqlalchemy.exc import OperationalError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from sqlalchemy import event
@@ -18,6 +20,30 @@ from .middleware import PrefixMiddleware
 csrf = CSRFProtect()
 
 _SQLITE_CONNECT_HOOK_INSTALLED = False
+
+
+def _bootstrap_schema(attempts: int = 6) -> None:
+    """建表 + 补列。
+
+    gunicorn 用多个 worker 启动时会**并发**执行建表/补列，后启动的进程可能撞上
+    「table ... already exists」「duplicate column name ...」。这类竞态不是真错误
+    （另一个进程已经建好了），重试即可；其它 OperationalError 仍然抛出。
+    """
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            db.create_all()
+            ensure_sqlite_schema()
+            return
+        except OperationalError as exc:
+            db.session.rollback()
+            message = str(exc).lower()
+            if "already exists" not in message and "duplicate column" not in message:
+                raise
+            last_exc = exc
+            time.sleep(0.3 * (attempt + 1))
+    if last_exc is not None:
+        raise last_exc
 
 
 def create_app():
@@ -102,9 +128,8 @@ def create_app():
         }
 
     with app.app_context():
-        db.create_all()
-        # Ensure existing SQLite DB gets new columns/tables
-        ensure_sqlite_schema()
+        # 建表 + 给已有 SQLite 库补列（多 worker 并发启动时容忍竞态）
+        _bootstrap_schema()
         if not app.config.get("TESTING"):
             ensure_seed_data()
 
