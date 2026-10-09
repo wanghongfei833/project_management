@@ -58,7 +58,7 @@ def main() -> int:
             return 1
 
         cfg = sms_config()
-        if not sms_configured(cfg):
+        if not sms_configured(cfg) and not args.dry_run:
             print(
                 "[skip] 短信未配置：需要 ALIYUN_SMS_ACCESS_KEY_ID / "
                 "ALIYUN_SMS_ACCESS_KEY_SECRET / ALIYUN_SMS_SIGN_NAME"
