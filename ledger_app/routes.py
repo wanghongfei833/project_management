@@ -66,6 +66,7 @@ from .models import (
     ProjectMember,
     ProjectDeleteApproval,
     ProjectDeleteRequest,
+    ProjectLogRule,
     ProjectDividendDistribution,
     ProjectDividendRecipient,
     ProjectEndApproval,
@@ -95,6 +96,7 @@ from .upload_paths import (
     transaction_attachment_relpath,
 )
 from .pending import pending_items_for_user
+from .log_rules import WEEKDAY_LABELS, rules_for_project, weekdays_label, weekdays_to_csv
 from .sms import is_valid_phone, normalize_phone
 from .sms_alerts import send_pending_alerts, send_test_sms, sms_status
 from .utils import safe_join_upload, sha256_file
@@ -421,6 +423,73 @@ def users_edit(user_id: int):
         return redirect(url_for("main.users_list"))
 
     return render_template("user_edit.html", user=u, form=form, is_admin=is_admin())
+
+
+def _purge_user_references(u: User) -> dict[str, int]:
+    """删除用户前，清理所有指向 users.id 的外键引用。
+
+    - 外键列是主键或 NOT NULL（如 project_members.user_id、各种 approval.user_id）→ 删除这些行；
+    - 其它可空列（created_by / leader / recipient / actor 等）→ 置空，保留历史记录。
+    """
+    stats = {"deleted": 0, "nulled": 0}
+    target = int(u.id)
+    for table in db.metadata.sorted_tables:
+        if table.name == "users":
+            continue
+        for fk in list(table.foreign_keys):
+            if fk.column.table.name != "users" or fk.column.name != "id":
+                continue
+            col = fk.parent
+            if col.primary_key or not col.nullable:
+                res = db.session.execute(table.delete().where(col == target))
+                stats["deleted"] += int(res.rowcount or 0)
+            else:
+                res = db.session.execute(
+                    table.update().where(col == target).values(**{col.name: None})
+                )
+                stats["nulled"] += int(res.rowcount or 0)
+    return stats
+
+
+@bp.post("/users/<int:user_id>/delete")
+@login_required
+def users_delete(user_id: int):
+    """删除用户（连带清理其成员关系与审批记录；历史流水的「发起人」置空保留）。"""
+    if not is_admin():
+        flash("无权限", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    u = db.session.get(User, user_id)
+    if not u:
+        flash("用户不存在", "warning")
+        return redirect(url_for("main.users_list"))
+    if int(u.id) == int(current_user.id):
+        flash("不能删除当前登录账号", "warning")
+        return redirect(url_for("main.users_list"))
+    if u.username == "admin":
+        flash("不能删除内置 admin 账号", "warning")
+        return redirect(url_for("main.users_list"))
+    if u.role == Role.ADMIN.value:
+        others = (
+            db.session.query(db.func.count(User.id))
+            .filter(User.role == Role.ADMIN.value, User.id != u.id)
+            .scalar()
+            or 0
+        )
+        if int(others) == 0:
+            flash("至少需要保留一个管理员账号，无法删除", "warning")
+            return redirect(url_for("main.users_list"))
+
+    username = u.username
+    stats = _purge_user_references(u)
+    db.session.delete(u)
+    db.session.commit()
+    flash(
+        f"已删除用户「{username}」"
+        f"（清理关联记录 {stats['deleted']} 条，历史引用置空 {stats['nulled']} 处）",
+        "success",
+    )
+    return redirect(url_for("main.users_list"))
 
 
 @bp.post("/users/<int:user_id>/reset-password")
@@ -2185,6 +2254,89 @@ def project_logs_new(project_id: int):
     return render_template("project_logs_new.html", project=p, form=form, is_admin=is_admin())
 
 
+def _can_manage_log_rules(p: Project) -> bool:
+    """谁能维护项目的日志撰写规则：管理员或该项目负责人。"""
+    if is_admin():
+        return True
+    return p.leader_user_id is not None and int(p.leader_user_id) == int(current_user.id)
+
+
+@bp.post("/projects/<int:project_id>/log-rules/add")
+@login_required
+def project_log_rule_add(project_id: int):
+    """新增/更新一条日志撰写规则（同一个人重复 add 视为改频率）。"""
+    p = db.session.get(Project, project_id)
+    if not p:
+        flash("项目不存在", "warning")
+        return redirect(url_for("main.projects_list"))
+    if not _can_manage_log_rules(p):
+        flash("无权限设置日志撰写规则", "danger")
+        return redirect(url_for("main.project_detail", project_id=p.id))
+
+    user_id = request.form.get("user_id", type=int)
+    day_set = {
+        int(d)
+        for d in request.form.getlist("weekdays")
+        if str(d).strip().isdigit() and 1 <= int(d) <= 7
+    }
+    member_ids = _project_member_user_ids(p.id)
+    if not user_id or int(user_id) not in member_ids:
+        flash("请选择该项目的成员", "warning")
+        return redirect(url_for("main.project_detail", project_id=p.id))
+    if not day_set:
+        flash("请至少选择一个星期（周一~周日）", "warning")
+        return redirect(url_for("main.project_detail", project_id=p.id))
+
+    u = db.session.get(User, int(user_id))
+    rule = ProjectLogRule.query.filter_by(project_id=p.id, user_id=int(user_id)).first()
+    is_new = rule is None
+    if rule is None:
+        rule = ProjectLogRule(
+            project_id=p.id,
+            user_id=int(user_id),
+            created_by_user_id=current_user.id,
+        )
+        db.session.add(rule)
+    rule.weekdays = weekdays_to_csv(day_set)
+    rule.is_active = True
+
+    label = weekdays_label(rule.weekdays)
+    _log_project_activity(
+        int(p.id),
+        "project.log_rule",
+        f"{'新增' if is_new else '修改'}日志撰写规则：{(u.username if u else user_id)} → {label}",
+    )
+    db.session.commit()
+    flash(f"已{'添加' if is_new else '更新'}日志撰写规则：{(u.username if u else user_id)} {label}", "success")
+    return redirect(url_for("main.project_detail", project_id=p.id))
+
+
+@bp.post("/projects/<int:project_id>/log-rules/<int:rule_id>/delete")
+@login_required
+def project_log_rule_delete(project_id: int, rule_id: int):
+    p = db.session.get(Project, project_id)
+    if not p:
+        flash("项目不存在", "warning")
+        return redirect(url_for("main.projects_list"))
+    if not _can_manage_log_rules(p):
+        flash("无权限设置日志撰写规则", "danger")
+        return redirect(url_for("main.project_detail", project_id=p.id))
+
+    rule = db.session.get(ProjectLogRule, rule_id)
+    if not rule or int(rule.project_id) != int(p.id):
+        flash("规则不存在", "warning")
+        return redirect(url_for("main.project_detail", project_id=p.id))
+
+    username = rule.user.username if rule.user else rule.user_id
+    db.session.delete(rule)
+    _log_project_activity(
+        int(p.id), "project.log_rule", f"删除日志撰写规则：{username}"
+    )
+    db.session.commit()
+    flash(f"已删除 {username} 的日志撰写规则", "success")
+    return redirect(url_for("main.project_detail", project_id=p.id))
+
+
 @bp.route("/projects/<int:project_id>/updates", methods=["POST"])
 @login_required
 def project_update_post(project_id: int):
@@ -3051,6 +3203,13 @@ def project_detail(project_id: int):
         end_revive_req=end_revive_req,
         project_updates=project_updates,
         update_form=update_form,
+        log_rule_rows=[
+            {"rule": r, "label": weekdays_label(r.weekdays)}
+            for r in rules_for_project(int(p.id))
+        ],
+        log_rule_members=display_members,
+        weekday_options=[(d, WEEKDAY_LABELS[d]) for d in range(1, 8)],
+        can_manage_log_rules=_can_manage_log_rules(p),
         transactions=txs,
         pending_transactions=pending_txs,
         create_req_by_tx=pending_create_req_by_tx,

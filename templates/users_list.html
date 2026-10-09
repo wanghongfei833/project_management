@@ -57,6 +57,12 @@
                 data-user-id="{{ u.id }}"
                 data-username="{{ u.username }}"
               >重置密码</button>
+              <form method="post" class="d-inline"
+                    action="{{ url_for('main.users_delete', user_id=u.id) }}"
+                    onsubmit="return confirm('删除用户「{{ u.username }}」？该操作不可恢复（其审批/成员关系会被清理，历史流水的发起人字段置空）。');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
+              </form>
             </td>
           </tr>
         {% else %}

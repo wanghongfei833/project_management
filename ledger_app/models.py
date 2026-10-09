@@ -57,6 +57,8 @@ class SmsNotification(db.Model):
     request_id = db.Column(db.String(64), nullable=True)  # 阿里云 BizId
     error = db.Column(db.Text, nullable=True)
     trigger = db.Column(db.String(16), nullable=False, default="auto", index=True)  # auto/manual/test
+    # 这条短信对应的「业务日期」（如日志提醒的当天），用于按天去重；待办提醒为空
+    alert_date = db.Column(db.Date, nullable=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
 
     user = db.relationship("User", foreign_keys=[user_id])
@@ -289,6 +291,32 @@ class ProjectMember(db.Model):
 
     project = db.relationship("Project", back_populates="members")
     user = db.relationship("User")
+
+
+class ProjectLogRule(db.Model):
+    """项目日志撰写规则：某人需要按指定星期（1=周一 … 7=周日）写日志。
+
+    weekdays 存成 "1,3,5" 这样的 CSV；七个都选就是「每天」。
+    """
+
+    __tablename__ = "project_log_rules"
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(
+        db.Integer,
+        db.ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    weekdays = db.Column(db.String(32), nullable=False, default="1,2,3,4,5,6,7")
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    project = db.relationship("Project")
+    user = db.relationship("User", foreign_keys=[user_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
 
 
 class ProjectDeleteRequest(db.Model):

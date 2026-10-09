@@ -308,6 +308,76 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
   </div>
   </div>
 
+  {% if can_manage_log_rules or log_rule_rows %}
+  <div class="card mb-4" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.05);border:1px solid #e8ecf0;">
+    <div class="card-header py-2" style="background:linear-gradient(135deg,#5b7fa5,#4a6d8c);color:#fff;border-radius:10px 10px 0 0;">
+      <span class="fw-bold"><span style="font-size:1.1rem;">📝</span> 日志撰写规则</span>
+      <span class="small ms-2 opacity-75">设定谁要在每周哪几天写日志；当天 20:00 前没写会发短信提醒</span>
+    </div>
+    <div class="card-body">
+      {% if log_rule_rows %}
+        <div class="table-responsive mb-3">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr><th>撰写人</th><th>频率</th><th>设置</th><th class="text-end">操作</th></tr>
+            </thead>
+            <tbody>
+              {% for row in log_rule_rows %}
+                <tr>
+                  <td class="fw-semibold">{{ row.rule.user.username if row.rule.user else '—' }}</td>
+                  <td><span class="badge text-bg-primary">{{ row.label }}</span></td>
+                  <td class="small text-muted">
+                    {{ row.rule.created_by.username if row.rule.created_by else '—' }} · {{ row.rule.created_at|dt }}
+                  </td>
+                  <td class="text-end">
+                    {% if can_manage_log_rules %}
+                      <form method="post" class="d-inline"
+                            action="{{ url_for('main.project_log_rule_delete', project_id=project.id, rule_id=row.rule.id) }}"
+                            onsubmit="return confirm('删除这条日志撰写规则？');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="text-muted small mb-3">还没有设置日志撰写规则。</div>
+      {% endif %}
+
+      {% if can_manage_log_rules %}
+        <form method="post" action="{{ url_for('main.project_log_rule_add', project_id=project.id) }}" class="row g-2 align-items-end">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="col-md-3">
+            <label class="form-label small text-muted mb-1">撰写人</label>
+            <select class="form-select form-select-sm" name="user_id">
+              {% for m in log_rule_members %}<option value="{{ m.id }}">{{ m.username }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small text-muted mb-1">频率（可多选；全选七天＝每天）</label>
+            <div class="d-flex flex-wrap gap-2">
+              {% for value, label in weekday_options %}
+                <div class="form-check form-check-inline me-0">
+                  <input class="form-check-input" type="checkbox" name="weekdays" value="{{ value }}" id="wd{{ value }}">
+                  <label class="form-check-label small" for="wd{{ value }}">{{ label }}</label>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-sm btn-success" type="submit">+ 添加规则</button>
+            <span class="small text-muted ms-1">同一个人再加＝改频率</span>
+          </div>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="d-flex justify-content-between align-items-center mb-2">
     <h2 class="h6 mb-0">应收追加记录</h2>
     {% if project.status != 'ended' and (is_admin or current_user.id in members|map(attribute='id')|list) %}
@@ -597,4 +667,3 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
 
   <a class="btn btn-outline-secondary" href="{{ url_for('main.dashboard') }}">返回</a>
 {% endblock %}
-

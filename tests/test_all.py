@@ -30,9 +30,16 @@ from ledger_app.models import (
     ProjectExpectedIncomeAdjustment, ProjectDividendDistribution,
     ProjectEndRequest, ProjectEndApproval, ProjectReviveRequest, ProjectReviveApproval,
     ProjectDeleteRequest, ProjectDeleteApproval, ProjectActivityLog, Attachment,
+    ProjectLogRule, ProjectUpdate,
     SmsNotification, SmsNotificationProject,
 )
 from ledger_app.project_finance import build_project_finance
+from ledger_app.log_rules import (
+    build_log_reminder_plans,
+    local_day_utc_bounds,
+    send_log_reminders,
+    weekdays_label,
+)
 from ledger_app.sms import render_pending_text
 from ledger_app.sms_alerts import build_alert_plans, send_pending_alerts
 
@@ -1003,3 +1010,284 @@ class TestSchemaBootstrap:
         monkeypatch.setattr(_db, "create_all", broken)
         with pytest.raises(OperationalError):
             pkg._bootstrap_schema(attempts=2)
+
+
+class TestLogRulesAndReminders:
+    """日志撰写规则（每周 N 天）+ 每天 20:00 未写日志短信提醒。"""
+
+    MONDAY = date(2026, 3, 2)  # 周一
+    TUESDAY = date(2026, 3, 3)
+
+    @staticmethod
+    def _enable_sms(monkeypatch):
+        monkeypatch.setenv("ALIYUN_SMS_ACCESS_KEY_ID", "test-key-id")
+        monkeypatch.setenv("ALIYUN_SMS_ACCESS_KEY_SECRET", "test-key-secret")
+        monkeypatch.setenv("ALIYUN_SMS_SIGN_NAME", "测试签名")
+
+    @staticmethod
+    def _fake_sender(ok=True):
+        calls = []
+
+        def _send(phone, number, **kwargs):
+            calls.append((phone, number))
+            return {
+                "ok": ok,
+                "code": "OK" if ok else "isv.BUSINESS_LIMIT_CONTROL",
+                "message": "OK" if ok else "触发流控",
+                "request_id": "R-LOG",
+                "biz_id": "B-LOG" if ok else "",
+                "content": render_pending_text(number),
+                "configured": True,
+                "template_code": "SMS_512630691",
+                "phone": phone,
+            }
+
+        return _send, calls
+
+    def _project(self, name, members):
+        seed = get_seed()
+        p = Project.query.filter_by(name=name).first()
+        if p:
+            return p
+        p = Project(
+            name=name,
+            expected_income_cents=0,
+            broker_fee_mode="percent",
+            broker_fee_direction="we_pay_separate",
+            referral_ratio=Decimal("0"),
+            status="open",
+            can_dividend=True,
+            leader_user_id=seed["users"][members[0]],
+            planned_start_date=date(2026, 1, 1),
+            planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        for uname in ["admin", *members]:
+            _db.session.add(ProjectMember(project_id=p.id, user_id=seed["users"][uname]))
+        _db.session.commit()
+        return p
+
+    def test_add_update_delete_rule(self, client):
+        seed = get_seed()
+        p = self._project("ProjLogRule", ["wang", "si"])
+        si = _db.session.get(User, seed["users"]["si"])
+        login(client, "admin", "admin123!")
+
+        rv = client.post(
+            f"/projects/{p.id}/log-rules/add",
+            data={"user_id": si.id, "weekdays": ["1", "3", "5"]},
+            follow_redirects=True,
+        )
+        assert rv.status_code == 200
+        rule = ProjectLogRule.query.filter_by(project_id=p.id, user_id=si.id).first()
+        assert rule is not None and rule.weekdays == "1,3,5"
+        assert weekdays_label(rule.weekdays) == "每周一、周三、周五"
+
+        # 同一个人再 add = 改频率，不会产生第二条
+        client.post(
+            f"/projects/{p.id}/log-rules/add",
+            data={"user_id": si.id, "weekdays": ["1", "2", "3", "4", "5", "6", "7"]},
+            follow_redirects=True,
+        )
+        assert ProjectLogRule.query.filter_by(project_id=p.id, user_id=si.id).count() == 1
+        rule = ProjectLogRule.query.filter_by(project_id=p.id, user_id=si.id).first()
+        assert weekdays_label(rule.weekdays) == "每天"
+
+        # 详情页能看到规则
+        html = client.get(f"/projects/{p.id}").get_data(as_text=True)
+        assert "日志撰写规则" in html and "每天" in html
+
+        client.post(f"/projects/{p.id}/log-rules/{rule.id}/delete", follow_redirects=True)
+        assert ProjectLogRule.query.filter_by(project_id=p.id, user_id=si.id).first() is None
+
+    def test_rule_guards(self, client):
+        seed = get_seed()
+        p = self._project("ProjLogGuard", ["wang", "si"])
+        si = _db.session.get(User, seed["users"]["si"])
+        zhuo = _db.session.get(User, seed["users"]["zhuo"])  # 非本项目成员
+
+        # 普通成员无权添加
+        login(client, "si")
+        client.post(
+            f"/projects/{p.id}/log-rules/add",
+            data={"user_id": si.id, "weekdays": ["1"]},
+            follow_redirects=True,
+        )
+        assert ProjectLogRule.query.filter_by(project_id=p.id).count() == 0
+
+        # 负责人可以添加；但不能加非项目成员
+        client.post("/logout")
+        login(client, "wang")
+        client.post(
+            f"/projects/{p.id}/log-rules/add",
+            data={"user_id": zhuo.id, "weekdays": ["1"]},
+            follow_redirects=True,
+        )
+        assert ProjectLogRule.query.filter_by(project_id=p.id).count() == 0
+
+        # 没选星期也不行
+        client.post(
+            f"/projects/{p.id}/log-rules/add",
+            data={"user_id": si.id},
+            follow_redirects=True,
+        )
+        assert ProjectLogRule.query.filter_by(project_id=p.id).count() == 0
+
+        # 正常添加
+        client.post(
+            f"/projects/{p.id}/log-rules/add",
+            data={"user_id": si.id, "weekdays": ["1"]},
+            follow_redirects=True,
+        )
+        assert ProjectLogRule.query.filter_by(project_id=p.id, user_id=si.id).count() == 1
+
+    def test_log_reminder_plan_send_and_dedupe(self, client, monkeypatch):
+        self._enable_sms(monkeypatch)
+        seed = get_seed()
+        p = self._project("ProjLogRemind", ["wang", "si"])
+        si = _db.session.get(User, seed["users"]["si"])
+        si.phone = "13800000002"
+        _db.session.add(
+            ProjectLogRule(
+                project_id=p.id,
+                user_id=si.id,
+                weekdays="1",  # 每周一
+                created_by_user_id=seed["users"]["admin"],
+            )
+        )
+        _db.session.commit()
+
+        # 周一该写却没写 → 命中
+        plans, _skipped = build_log_reminder_plans(local_day=self.MONDAY)
+        mine = [pl for pl in plans if pl.user_id == si.id]
+        assert len(mine) == 1
+        assert mine[0].missing_count >= 1
+        assert any(pid == p.id for pid, _name, _cnt in mine[0].projects)
+
+        # 周二不在频率里 → 不提醒
+        plans2, _ = build_log_reminder_plans(local_day=self.TUESDAY)
+        assert not [pl for pl in plans2 if pl.user_id == si.id]
+
+        # 当天写了日志 → 不再提醒
+        start_utc, _end = local_day_utc_bounds(self.MONDAY)
+        _db.session.add(
+            ProjectUpdate(
+                project_id=p.id,
+                body="周一日志",
+                created_by_user_id=si.id,
+                created_at=start_utc + timedelta(hours=3),
+            )
+        )
+        _db.session.commit()
+        plans3, _ = build_log_reminder_plans(local_day=self.MONDAY)
+        # si 在别的项目上还有别的规则，这里只关心本项目已经写过日志
+        assert not any(
+            pid == p.id
+            for pl in plans3
+            if pl.user_id == si.id
+            for pid, _name, _cnt in pl.projects
+        )
+
+        # 删掉日志 → 发提醒并落库（含项目拆分）
+        ProjectUpdate.query.filter_by(
+            project_id=p.id, created_by_user_id=si.id
+        ).delete()
+        _db.session.commit()
+        sender, calls = self._fake_sender()
+        monkeypatch.setattr("ledger_app.log_rules.send_sms", sender)
+
+        res = send_log_reminders(local_day=self.MONDAY)
+        assert any(phone == "13800000002" for phone, _n in calls)
+        rec = (
+            SmsNotification.query.filter_by(user_id=si.id, trigger="log_reminder")
+            .order_by(SmsNotification.id.desc())
+            .first()
+        )
+        assert rec is not None and rec.status == "sent" and rec.pending_count >= 1
+        assert any(sp.project_id == p.id for sp in rec.projects)
+        assert res["sent"] >= 1
+
+        # 同一天重复跑不会重复发（除非 --force）
+        before = sum(1 for phone, _n in calls if phone == "13800000002")
+        send_log_reminders(local_day=self.MONDAY)
+        after = sum(1 for phone, _n in calls if phone == "13800000002")
+        assert after == before
+        send_log_reminders(local_day=self.MONDAY, force=True)
+        assert sum(1 for phone, _n in calls if phone == "13800000002") == before + 1
+
+
+class TestUserDelete:
+    """管理员删除用户。"""
+
+    def test_delete_user_cleans_references(self, client):
+        seed = get_seed()
+        login(client, "admin", "admin123!")
+        p = Project.query.filter_by(name="ProjUserDelete").first()
+        if p is None:
+            p = Project(
+                name="ProjUserDelete",
+                expected_income_cents=0,
+                broker_fee_mode="percent",
+                broker_fee_direction="we_pay_separate",
+                referral_ratio=Decimal("0"),
+                status="open",
+                leader_user_id=seed["users"]["admin"],
+                planned_start_date=date(2026, 1, 1),
+                planned_end_date=date(2026, 12, 31),
+            )
+            _db.session.add(p)
+            _db.session.flush()
+            _db.session.commit()
+
+        u = User(username="todelete", role="viewer", is_active=True, phone="13800000077")
+        u.set_password("123456!")
+        _db.session.add(u)
+        _db.session.flush()
+        _db.session.add(ProjectMember(project_id=p.id, user_id=u.id))
+        tx = Transaction(
+            project_id=p.id, status="active", type="income", amount_cents=12345,
+            occur_date=date.today(), settled=True, created_by_user_id=u.id,
+        )
+        _db.session.add(tx)
+        _db.session.commit()
+        uid, txid = int(u.id), int(tx.id)
+
+        rv = client.post(f"/users/{uid}/delete", follow_redirects=True)
+        assert rv.status_code == 200
+        assert _db.session.get(User, uid) is None
+        assert ProjectMember.query.filter_by(user_id=uid).first() is None
+        # 历史流水保留，只是发起人置空
+        kept = _db.session.get(Transaction, txid)
+        assert kept is not None and kept.created_by_user_id is None
+
+    def test_delete_guards(self, client):
+        seed = get_seed()
+        admin_id = seed["users"]["admin"]
+
+        # 普通用户删不掉
+        login(client, "wang")
+        client.post(f"/users/{admin_id}/delete", follow_redirects=True)
+        assert _db.session.get(User, admin_id) is not None
+
+        # 管理员不能删自己
+        client.post("/logout")
+        login(client, "admin", "admin123!")
+        client.post(f"/users/{admin_id}/delete", follow_redirects=True)
+        assert _db.session.get(User, admin_id) is not None
+
+        # 另一个管理员也不能删内置 admin 账号
+        other = User(username="admin2", role="admin", is_active=True, phone="13800000088")
+        other.set_password("123456!")
+        _db.session.add(other)
+        _db.session.commit()
+        other_id = int(other.id)
+
+        client.post("/logout")
+        login(client, "admin2", "123456!")
+        client.post(f"/users/{admin_id}/delete", follow_redirects=True)
+        assert _db.session.get(User, admin_id) is not None
+
+        # 删自己（admin2 是当前登录）也不行
+        client.post(f"/users/{other_id}/delete", follow_redirects=True)
+        assert _db.session.get(User, other_id) is not None

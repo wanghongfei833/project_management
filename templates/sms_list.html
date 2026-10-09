@@ -227,6 +227,7 @@
               <td class="small text-muted">
                 {% if r.trigger == 'auto' %}自动
                 {% elif r.trigger == 'manual' %}手动
+                {% elif r.trigger == 'log_reminder' %}日志提醒
                 {% else %}测试{% endif %}
               </td>
               <td class="small">

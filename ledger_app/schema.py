@@ -720,6 +720,33 @@ def ensure_sqlite_schema():
     if _table_exists("users") and not _column_exists("users", "phone"):
         db.session.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(32)"))
 
+    # 项目日志撰写规则
+    if not _table_exists("project_log_rules"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE project_log_rules (
+                  id INTEGER PRIMARY KEY,
+                  project_id INTEGER NOT NULL,
+                  user_id INTEGER NOT NULL,
+                  weekdays VARCHAR(32) NOT NULL DEFAULT '1,2,3,4,5,6,7',
+                  is_active BOOLEAN NOT NULL DEFAULT 1,
+                  created_by_user_id INTEGER,
+                  created_at DATETIME NOT NULL,
+                  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                  FOREIGN KEY(user_id) REFERENCES users(id),
+                  FOREIGN KEY(created_by_user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text("CREATE INDEX ix_project_log_rules_project_id ON project_log_rules (project_id)")
+        )
+        db.session.execute(
+            text("CREATE INDEX ix_project_log_rules_user_id ON project_log_rules (user_id)")
+        )
+
     # 短信发送记录
     if not _table_exists("sms_notifications"):
         db.session.execute(
@@ -738,6 +765,7 @@ def ensure_sqlite_schema():
                   request_id VARCHAR(64),
                   error TEXT,
                   "trigger" VARCHAR(16) NOT NULL DEFAULT 'auto',
+                  alert_date DATE,
                   created_at DATETIME NOT NULL,
                   FOREIGN KEY(user_id) REFERENCES users(id)
                 )
@@ -755,6 +783,11 @@ def ensure_sqlite_schema():
         )
         db.session.execute(
             text("CREATE INDEX ix_sms_notifications_created_at ON sms_notifications (created_at)")
+        )
+
+    if _table_exists("sms_notifications") and not _column_exists("sms_notifications", "alert_date"):
+        db.session.execute(
+            text("ALTER TABLE sms_notifications ADD COLUMN alert_date DATE")
         )
 
     if not _table_exists("sms_notification_projects"):

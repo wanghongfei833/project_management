@@ -1,0 +1,20 @@
+# 日志撰写提醒：每天 20:00 由 pm-log-reminder.timer 拉起
+# 安装方式同 pm-sms-alert.service（见 docs/sms-alerts.md）
+[Unit]
+Description=PM Ledger daily log-writing SMS reminder
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/project/PM
+
+Environment="URL_PREFIX=/PM"
+Environment="DATABASE_URL=sqlite:////root/project/PM/instance/ledger.db"
+Environment="UPLOAD_FOLDER=/root/project/PM/uploads"
+Environment="PATH=/root/miniconda3/envs/TIE/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+EnvironmentFile=-/root/project/PM/.env.sms
+
+ExecStart=/root/miniconda3/envs/TIE/bin/python /root/project/PM/scripts/send_log_reminders.py

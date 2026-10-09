@@ -79,3 +79,40 @@ journalctl -u pm-sms-alert.service -n 50 --no-pager
 | 发送失败 `isv.SMS_TEMPLATE_ILLEGAL` | 模板 CODE 不对或未审核 |
 | 发送失败 `isv.BUSINESS_LIMIT_CONTROL` | 触发阿里云流控（同号码/同签名频率限制） |
 | 一直不发 | 待办未满 6 小时、或 6 小时内已发过、或该用户没填手机号（页面会给出各原因的跳过人数） |
+
+## 日志撰写提醒（每天 20:00）
+
+### 规则怎么配
+
+项目详情页 →「📝 日志撰写规则」→ 选撰写人 + 勾选星期 → 添加。
+
+- 周一到周日可多选，**七个都勾＝每天**；
+- 同一个人重复添加＝修改频率，不会产生重复规则；
+- 只有**管理员**和**项目负责人**能维护；撰写人必须是该项目成员；
+- 项目终止后不再提醒。
+
+### 判定与发送
+
+- 每天晚上 20:00 检查：今天该写日志的人，如果**当天没有为该项目的日志**（`project_updates`），就发一条短信；
+- 短信内容暂用待办模板，`${number}` = 当天未写的日志条数（一个人多个项目未写会合并成一条）；
+- 同一天只发一次（按「业务日期」去重，重跑不会重复发）；
+- 发送记录出现在「短信」页，触发方式显示为**日志提醒**。
+
+### 安装 / 验证
+
+```bash
+cp deploy/pm-log-reminder.service /etc/systemd/system/
+cp deploy/pm-log-reminder.timer   /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now pm-log-reminder.timer
+systemctl list-timers pm-log-reminder.timer
+
+# 只看今天会提醒谁，不发送
+/root/miniconda3/envs/TIE/bin/python scripts/send_log_reminders.py --dry-run
+# 指定日期检查（排查用）
+/root/miniconda3/envs/TIE/bin/python scripts/send_log_reminders.py --dry-run --date 2026-10-09
+# 手动发一轮（忽略「今天已提醒」）
+/root/miniconda3/envs/TIE/bin/python scripts/send_log_reminders.py --force
+```
+
+> 时间口径：库里存 UTC，业务按北京时间判断「今天」。

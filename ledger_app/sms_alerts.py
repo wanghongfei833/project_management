@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from datetime import datetime, timedelta, timezone
 
 from .extensions import db
@@ -138,19 +139,21 @@ def build_alert_plans(
     return plans, skipped
 
 
-def _record(
+def record_sms(
     *,
-    plan: AlertPlan | None,
+    user_id: int | None,
     phone: str,
     username: str | None,
     pending_count: int,
     result: dict,
     trigger: str,
     projects: list[tuple[int | None, str, int]],
+    alert_date: date | None = None,
 ) -> SmsNotification:
+    """写一条短信记录（供待办提醒与日志提醒共用）。"""
     ok = bool(result.get("ok"))
     row = SmsNotification(
-        user_id=plan.user_id if plan else None,
+        user_id=user_id,
         username=username,
         phone=phone,
         pending_count=int(pending_count),
@@ -161,6 +164,7 @@ def _record(
         request_id=(result.get("biz_id") or result.get("request_id") or None),
         error=None if ok else f"{result.get('code') or ''}: {result.get('message') or ''}".strip(": "),
         trigger=trigger,
+        alert_date=alert_date,
     )
     for pid, pname, count in projects:
         row.projects.append(
@@ -207,8 +211,8 @@ def send_pending_alerts(
 
     for plan in plans:
         result = send_sms(plan.phone, plan.pending_count)
-        _record(
-            plan=plan,
+        record_sms(
+            user_id=plan.user_id,
             phone=plan.phone,
             username=plan.username,
             pending_count=plan.pending_count,
@@ -237,8 +241,8 @@ def send_test_sms(phone: str, number: int = 1, *, actor: User | None = None) -> 
     target = normalize_phone(phone)
     result = send_sms(target, number)
     if result.get("configured"):
-        _record(
-            plan=None,
+        record_sms(
+            user_id=None,
             phone=target,
             username=(actor.username if actor else None),
             pending_count=int(number),
