@@ -34,6 +34,13 @@ chmod 600 .env.sms
 
 2. 安装定时任务（每 30 分钟检查一次，满足条件才发）：
 
+> 另外要让 **Web 服务**也能读到这个密钥文件（否则「短信」页的「发送测试短信」「立即检查并发送」会提示未配置）：
+> 在 `/etc/systemd/system/private-pm.service` 里加一行
+> `EnvironmentFile=-/root/project/PM/.env.sms`（带 `-` 表示文件不存在也能启动），
+> 然后 `systemctl daemon-reload && systemctl restart private-pm`。服务器上已配置好。
+
+3. 安装定时任务（每 30 分钟检查一次，满足条件才发）：
+
 ```bash
 cp deploy/pm-sms-alert.service /etc/systemd/system/
 cp deploy/pm-sms-alert.timer   /etc/systemd/system/
@@ -42,7 +49,7 @@ systemctl enable --now pm-sms-alert.timer
 systemctl list-timers pm-sms-alert.timer
 ```
 
-3. 验证：
+4. 验证：
 
 ```bash
 # 只看会给谁发，不实际发送
