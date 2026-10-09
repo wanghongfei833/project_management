@@ -4,10 +4,40 @@
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
       <h1 class="h4 mb-0">用户管理</h1>
-      <div class="text-muted small">创建账号、调整角色/启用状态、重置密码</div>
+      <div class="text-muted small">
+        创建账号、调整角色/启用状态、重置密码 ·
+        共 {{ stats.total }} 人（启用 {{ stats.active }} / 禁用 {{ stats.inactive }} / 未填手机号 {{ stats.no_phone }}）
+      </div>
     </div>
     <a class="btn btn-sm btn-primary" href="{{ url_for('main.users_new') }}">新增用户</a>
   </div>
+
+  <form class="row g-2 align-items-end mb-3" method="get">
+    <div class="col-sm-6 col-md-4">
+      <label class="form-label small text-muted mb-1">搜索（用户名或手机号）</label>
+      <input class="form-control form-control-sm" type="search" name="q" value="{{ q }}" placeholder="输入关键字">
+    </div>
+    <div class="col-sm-6 col-md-2">
+      <label class="form-label small text-muted mb-1">状态</label>
+      <select class="form-select form-select-sm" name="status">
+        <option value="">全部</option>
+        <option value="active" {% if selected_status == 'active' %}selected{% endif %}>启用</option>
+        <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>禁用</option>
+      </select>
+    </div>
+    <div class="col-sm-6 col-md-2">
+      <label class="form-label small text-muted mb-1">手机号</label>
+      <select class="form-select form-select-sm" name="phone">
+        <option value="">全部</option>
+        <option value="set" {% if selected_phone == 'set' %}selected{% endif %}>已填写</option>
+        <option value="empty" {% if selected_phone == 'empty' %}selected{% endif %}>未填写</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-sm btn-outline-secondary" type="submit">筛选</button>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.users_list') }}">重置</a>
+    </div>
+  </form>
 
   <div class="table-responsive">
     <table class="table table-sm align-middle">
@@ -66,7 +96,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="6" class="text-muted">暂无用户</td></tr>
+          <tr><td colspan="6" class="text-muted">没有符合条件的用户</td></tr>
         {% endfor %}
       </tbody>
     </table>

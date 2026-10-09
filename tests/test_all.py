@@ -795,28 +795,34 @@ class TestPhoneAndSms:
         return tx, req
 
     # ── 手机号录入 ────────────────────────────────────────────
-    def test_create_user_requires_phone(self, client):
+    def test_create_user_phone_rules(self, client):
         login(client, "admin", "admin123!")
         base = {"username": "phoneless", "role": "viewer", "is_active": 1, "password": "abc123!"}
 
-        # 不填手机号 → 不创建
+        # 不填手机号 → 允许创建（admin/实习生这类不收短信的人），只是会提示
         rv = client.post("/users/new", data=dict(base), follow_redirects=True)
-        assert rv.status_code == 200
-        assert User.query.filter_by(username="phoneless").first() is None
+        u = User.query.filter_by(username="phoneless").first()
+        assert u is not None and not u.phone
+        assert "不会收到短信" in rv.get_data(as_text=True)
 
-        # 号码不合法 → 不创建
-        rv = client.post("/users/new", data=dict(base, phone="12345"), follow_redirects=True)
-        assert User.query.filter_by(username="phoneless").first() is None
+        # 号码不合法 → 拒绝
+        client.post(
+            "/users/new", data=dict(base, username="badphone", phone="12345"),
+            follow_redirects=True,
+        )
+        assert User.query.filter_by(username="badphone").first() is None
 
         # 正常号码（带空格/+86 也能识别）→ 存成 11 位数字
-        rv = client.post(
-            "/users/new", data=dict(base, phone="+86 138 0000 0003"), follow_redirects=True
+        client.post(
+            "/users/new",
+            data=dict(base, username="withphone", phone="+86 138 0000 0003"),
+            follow_redirects=True,
         )
-        u = User.query.filter_by(username="phoneless").first()
-        assert u is not None and u.phone == "13800000003"
+        u2 = User.query.filter_by(username="withphone").first()
+        assert u2 is not None and u2.phone == "13800000003"
 
         # 号码重复 → 拒绝
-        rv = client.post(
+        client.post(
             "/users/new",
             data=dict(base, username="phoneless2", phone="13800000003"),
             follow_redirects=True,
@@ -845,6 +851,15 @@ class TestPhoneAndSms:
         )
         _db.session.refresh(zhuo)
         assert not zhuo.phone
+
+        # 留空 = 清掉手机号（admin 这种不需要短信的账号）
+        client.post(
+            f"/users/{hu.id}/edit",
+            data={"phone": "", "role": hu.role, "is_active": 1},
+            follow_redirects=True,
+        )
+        _db.session.refresh(hu)
+        assert not hu.phone
 
     # ── 提醒判定 ──────────────────────────────────────────────
     def test_alert_skips_without_phone_and_before_6h(self, client, monkeypatch):
@@ -1215,6 +1230,41 @@ class TestLogRulesAndReminders:
         assert after == before
         send_log_reminders(local_day=self.MONDAY, force=True)
         assert sum(1 for phone, _n in calls if phone == "13800000002") == before + 1
+
+
+class TestUserListFilters:
+    """用户管理：启用/禁用筛选 + 用户名/手机号搜索 + 手机号填写情况筛选。"""
+
+    def test_status_search_and_phone_filters(self, client):
+        seed = get_seed()
+        off = User(username="offuser", role="viewer", is_active=False, phone="13800000123")
+        off.set_password("123456!")
+        _db.session.add(off)
+        _db.session.commit()
+
+        login(client, "admin", "admin123!")
+
+        # 禁用筛选
+        html = client.get("/users?status=inactive").get_data(as_text=True)
+        assert "offuser" in html and ">wang<" not in html
+        # 启用筛选
+        html = client.get("/users?status=active").get_data(as_text=True)
+        assert "offuser" not in html and ">wang<" in html
+        # 名字搜索
+        html = client.get("/users?q=off").get_data(as_text=True)
+        assert "offuser" in html and ">si<" not in html
+        # 手机号搜索
+        html = client.get("/users?q=138000001").get_data(as_text=True)
+        assert "offuser" in html and ">wang<" not in html
+        # 未填手机号
+        html = client.get("/users?phone=empty").get_data(as_text=True)
+        assert "offuser" not in html and "未填写" in html
+        # 已填手机号
+        html = client.get("/users?phone=set").get_data(as_text=True)
+        assert "offuser" in html
+
+        _db.session.delete(_db.session.get(User, off.id))
+        _db.session.commit()
 
 
 class TestUserDelete:

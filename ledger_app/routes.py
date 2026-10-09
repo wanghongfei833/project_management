@@ -341,8 +341,40 @@ def users_list():
         flash("无权限", "danger")
         return redirect(url_for("main.dashboard"))
 
-    users = User.query.order_by(User.id.asc()).all()
-    return render_template("users_list.html", users=users, is_admin=is_admin())
+    q_text = (request.args.get("q") or "").strip()
+    status = (request.args.get("status") or "").strip()  # active / inactive
+    phone_filter = (request.args.get("phone") or "").strip()  # set / empty
+
+    query = User.query
+    if q_text:
+        like = f"%{q_text}%"
+        query = query.filter(db.or_(User.username.like(like), User.phone.like(like)))
+    if status == "active":
+        query = query.filter(User.is_active.is_(True))
+    elif status == "inactive":
+        query = query.filter(User.is_active.is_(False))
+    if phone_filter == "set":
+        query = query.filter(User.phone.isnot(None), User.phone != "")
+    elif phone_filter == "empty":
+        query = query.filter(db.or_(User.phone.is_(None), User.phone == ""))
+
+    users = query.order_by(User.id.asc()).all()
+    all_users = User.query.all()
+    stats = {
+        "total": len(all_users),
+        "active": sum(1 for u in all_users if u.is_active),
+        "inactive": sum(1 for u in all_users if not u.is_active),
+        "no_phone": sum(1 for u in all_users if not (u.phone or "").strip()),
+    }
+    return render_template(
+        "users_list.html",
+        users=users,
+        stats=stats,
+        q=q_text,
+        selected_status=status,
+        selected_phone=phone_filter,
+        is_admin=is_admin(),
+    )
 
 
 @bp.route("/users/new", methods=["GET", "POST"])
@@ -358,8 +390,8 @@ def users_new():
             flash("用户名已存在", "warning")
             return render_template("user_form.html", form=form, mode="create", is_admin=is_admin())
 
-        phone = normalize_phone(form.phone.data)
-        if User.query.filter_by(phone=phone).first():
+        phone = normalize_phone(form.phone.data) or None
+        if phone and User.query.filter_by(phone=phone).first():
             flash("该手机号已被其他用户使用", "warning")
             return render_template("user_form.html", form=form, mode="create", is_admin=is_admin())
 
@@ -377,6 +409,8 @@ def users_new():
             flash(f"用户已创建，初始密码：{DEFAULT_NEW_USER_PASSWORD}", "success")
         else:
             flash("用户已创建（已使用你填写的初始密码）", "success")
+        if not phone:
+            flash("该用户未填手机号，不会收到短信提醒（可随时在编辑页补录）", "warning")
         return redirect(url_for("main.users_list"))
 
     return render_template("user_form.html", form=form, mode="create", is_admin=is_admin())
@@ -409,8 +443,12 @@ def users_edit(user_id: int):
             flash("不能禁用当前登录账号", "warning")
             return render_template("user_edit.html", user=u, form=form, is_admin=is_admin())
 
-        phone = normalize_phone(form.phone.data)
-        exists = User.query.filter(User.phone == phone, User.id != u.id).first()
+        phone = normalize_phone(form.phone.data) or None
+        exists = (
+            User.query.filter(User.phone == phone, User.id != u.id).first()
+            if phone
+            else None
+        )
         if exists:
             flash(f"该手机号已被用户「{exists.username}」使用", "warning")
             return render_template("user_edit.html", user=u, form=form, is_admin=is_admin())

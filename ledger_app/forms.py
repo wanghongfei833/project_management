@@ -32,8 +32,14 @@ from .sms import normalize_phone, is_valid_phone
 
 
 def phone_validator(form, field):
-    """校验手机号（允许 +86/空格/横线，存库前统一成 11 位数字）。"""
-    if not is_valid_phone(field.data):
+    """校验手机号（允许 +86/空格/横线，存库前统一成 11 位数字）。
+
+    留空是允许的：表示这个人不接收短信提醒（例如 admin 账号、还没定号码的实习生）。
+    """
+    raw = (field.data or "").strip()
+    if not raw:
+        return
+    if not is_valid_phone(raw):
         raise ValidationError("请输入正确的 11 位手机号")
 
 
@@ -192,9 +198,9 @@ class ProjectAdjustmentForm(FlaskForm):
 class UserCreateForm(FlaskForm):
     username = StringField("用户名", validators=[DataRequired(), Length(min=2, max=64)])
     phone = StringField(
-        "手机号",
-        validators=[DataRequired(message="请填写手机号"), phone_validator],
-        render_kw={"placeholder": "11 位手机号，用于待办短信提醒"},
+        "手机号（可留空）",
+        validators=[Optional(), phone_validator],
+        render_kw={"placeholder": "11 位手机号；留空＝该用户不收短信提醒"},
     )
     role = SelectField(
         "角色",
@@ -210,9 +216,9 @@ class UserCreateForm(FlaskForm):
 
 class UserEditForm(FlaskForm):
     phone = StringField(
-        "手机号",
-        validators=[DataRequired(message="请填写手机号"), phone_validator],
-        render_kw={"placeholder": "11 位手机号，用于待办短信提醒"},
+        "手机号（可留空）",
+        validators=[Optional(), phone_validator],
+        render_kw={"placeholder": "11 位手机号；留空＝该用户不收短信提醒"},
     )
     role = SelectField(
         "角色",
