@@ -96,7 +96,13 @@ from .upload_paths import (
     transaction_attachment_relpath,
 )
 from .pending import pending_items_for_user
-from .log_rules import WEEKDAY_LABELS, rules_for_project, weekdays_label, weekdays_to_csv
+from .log_rules import (
+    WEEKDAY_LABELS,
+    pending_log_tasks_for_user,
+    rules_for_project,
+    weekdays_label,
+    weekdays_to_csv,
+)
 from .sms import is_valid_phone, normalize_phone
 from .sms_alerts import send_pending_alerts, send_test_sms, sms_status
 from .utils import safe_join_upload, sha256_file
@@ -278,9 +284,16 @@ def _load_pending_approvals():
     g.pending_items = [i for i in all_items if not i.approved_by_me]
     g.pending_waiting = [i for i in all_items if i.approved_by_me]
     g.pending_count = len(g.pending_items)
-    # 登录后第一次打开页面时弹窗提醒；只弹一次
+    # 今天该写但还没写的日志（和待办一起在登录弹窗/待办页提醒）
+    try:
+        g.log_todo_items = pending_log_tasks_for_user(int(current_user.id))
+    except Exception:  # pragma: no cover - 计算失败不应影响页面
+        current_app.logger.exception("计算待写日志失败")
+        g.log_todo_items = []
+    g.log_todo_count = len(g.log_todo_items)
+    # 登录后第一次打开页面时弹窗提醒；只弹一次（待办 或 待写日志 任一非空就弹）
     g.show_pending_modal = bool(session.pop("show_pending_modal", False)) and bool(
-        g.pending_items
+        g.pending_items or g.log_todo_items
     )
 
 
@@ -309,6 +322,8 @@ def approvals_list():
         todo_items=getattr(g, "pending_items", []),
         waiting_items=getattr(g, "pending_waiting", []),
         pending_count=getattr(g, "pending_count", 0),
+        log_items=getattr(g, "log_todo_items", []),
+        log_count=getattr(g, "log_todo_count", 0),
         is_admin=is_admin(),
     )
 

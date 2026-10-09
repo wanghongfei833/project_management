@@ -137,8 +137,9 @@
             <li class="nav-item"><a class="nav-link {% if request.endpoint=='main.personal_earnings' %}active{% endif %}" href="{{ url_for('main.personal_earnings') }}">收入</a></li>
             <li class="nav-item">
               <a class="nav-link {% if request.endpoint=='main.approvals_list' %}active{% endif %}" href="{{ url_for('main.approvals_list') }}">
-                <i class="bi bi-bell{% if pending_count %} bell-ring{% endif %}"></i> 待办
+                <i class="bi bi-bell{% if pending_count or log_todo_count %} bell-ring{% endif %}"></i> 待办
                 {% if pending_count %}<span class="badge rounded-pill text-bg-danger ms-1">{{ pending_count }}</span>{% endif %}
+                {% if log_todo_count %}<span class="badge rounded-pill text-bg-warning ms-1" title="今天待写日志">{{ log_todo_count }}</span>{% endif %}
               </a>
             </li>
             {% if is_admin %}
@@ -195,17 +196,30 @@
           <div class="modal-content">
             <div class="modal-header">
               <h5 class="modal-title">
-                <i class="bi bi-bell-fill text-warning me-2"></i>你有 {{ pending_count }} 件申请待处理
+                <i class="bi bi-bell-fill text-warning me-2"></i>你有 {{ pending_count + log_todo_count }} 件事待处理
               </h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
             </div>
             <div class="modal-body p-0">
-              <div class="list-group list-group-flush">
-                {% with items = pending_items[:8] %}{% include "_pending_items.html" %}{% endwith %}
-              </div>
+              {% if pending_items %}
+                {% if log_todo_items %}
+                  <div class="px-3 pt-3 pb-1 small fw-semibold text-muted">待审批（{{ pending_count }}）</div>
+                {% endif %}
+                <div class="list-group list-group-flush">
+                  {% with items = pending_items[:8] %}{% include "_pending_items.html" %}{% endwith %}
+                </div>
+              {% endif %}
+              {% if log_todo_items %}
+                <div class="px-3 pt-3 pb-1 small fw-semibold text-muted {% if pending_items %}border-top{% endif %}">
+                  今天要写的日志（{{ log_todo_count }}）
+                </div>
+                <div class="list-group list-group-flush">
+                  {% with items = log_todo_items[:8] %}{% include "_log_todo_items.html" %}{% endwith %}
+                </div>
+              {% endif %}
             </div>
             <div class="modal-footer">
-              <div class="text-muted small me-auto">全部成员同意（或管理员同意）后申请会自动生效</div>
+              <div class="text-muted small me-auto">申请：全部成员同意（或管理员同意）后自动生效 · 日志：当天写完即完成</div>
               <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">稍后处理</button>
               <a class="btn btn-primary btn-sm" href="{{ url_for('main.approvals_list') }}">查看全部</a>
             </div>

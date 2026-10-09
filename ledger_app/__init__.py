@@ -124,6 +124,8 @@ def create_app():
             "pending_count": getattr(g, "pending_count", 0),
             "pending_items": getattr(g, "pending_items", []),
             "pending_waiting": getattr(g, "pending_waiting", []),
+            "log_todo_items": getattr(g, "log_todo_items", []),
+            "log_todo_count": getattr(g, "log_todo_count", 0),
             "show_pending_modal": getattr(g, "show_pending_modal", False),
         }
 

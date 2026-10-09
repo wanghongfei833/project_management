@@ -30,6 +30,16 @@ ALL_WEEKDAYS = {1, 2, 3, 4, 5, 6, 7}
 TZ_OFFSET = timedelta(hours=8)  # 北京时间
 
 
+def _url(endpoint: str, **values) -> str:
+    """生成站内链接；定时任务等无请求上下文时返回空串。"""
+    try:
+        from flask import url_for
+
+        return url_for(endpoint, **values)
+    except RuntimeError:
+        return ""
+
+
 def parse_weekdays(raw) -> set[int]:
     days = set()
     for part in str(raw or "").split(","):
@@ -256,3 +266,42 @@ def rules_for_project(project_id: int) -> list[ProjectLogRule]:
         .order_by(ProjectLogRule.id.asc())
         .all()
     )
+
+
+@dataclass
+class LogTodoItem:
+    """「今天该写但还没写」的一条日志任务（用于网页弹窗/待办页）。"""
+
+    rule_id: int
+    project_id: int
+    project_name: str
+    weekday_label: str
+    detail_url: str = ""
+    write_url: str = ""
+
+
+def pending_log_tasks_for_user(
+    user_id: int, *, local_day: date | None = None
+) -> list[LogTodoItem]:
+    """当前用户今天该写、但还没写的日志。"""
+    day = local_day or local_now().date()
+    items: list[LogTodoItem] = []
+    for rule in due_rules_for_day(day):
+        if int(rule.user_id) != int(user_id):
+            continue
+        project = rule.project
+        if project is None:
+            continue
+        if user_has_log(int(project.id), int(user_id), day):
+            continue
+        items.append(
+            LogTodoItem(
+                rule_id=int(rule.id),
+                project_id=int(project.id),
+                project_name=project.name,
+                weekday_label=weekdays_label(rule.weekdays),
+                detail_url=_url("main.project_logs", project_id=project.id),
+                write_url=_url("main.project_logs_new", project_id=project.id),
+            )
+        )
+    return items

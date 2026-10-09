@@ -37,6 +37,8 @@ from ledger_app.project_finance import build_project_finance
 from ledger_app.log_rules import (
     build_log_reminder_plans,
     local_day_utc_bounds,
+    local_now,
+    pending_log_tasks_for_user,
     send_log_reminders,
     weekdays_label,
 )
@@ -1286,6 +1288,76 @@ class TestLogRulesAndReminders:
         # force=True：跳过 6 小时冷却（同一轮测试里前面刚给 si 发过记录）
         plans2, _ = build_alert_plans(user_id=si.id, force=True)
         assert len(plans2) == 1
+
+    def test_pending_log_tasks_unit(self):
+        """按人算「今天该写的日志」：频率不符 / 已写 都不算。"""
+        seed = get_seed()
+        p = self._project("ProjLogUnit", ["wang", "si"])
+        si = _db.session.get(User, seed["users"]["si"])
+        _db.session.add(
+            ProjectLogRule(
+                project_id=p.id, user_id=si.id, weekdays="1",
+                created_by_user_id=seed["users"]["admin"],
+            )
+        )
+        _db.session.commit()
+
+        items = pending_log_tasks_for_user(int(si.id), local_day=self.MONDAY)
+        assert any(i.project_id == p.id for i in items)
+        # 周二不在频率里
+        assert not any(
+            i.project_id == p.id
+            for i in pending_log_tasks_for_user(int(si.id), local_day=self.TUESDAY)
+        )
+        # 周一写了日志 → 不再算
+        start_utc, _end = local_day_utc_bounds(self.MONDAY)
+        _db.session.add(
+            ProjectUpdate(
+                project_id=p.id, body="周一日志", created_by_user_id=si.id,
+                created_at=start_utc + timedelta(hours=2),
+            )
+        )
+        _db.session.commit()
+        assert not any(
+            i.project_id == p.id
+            for i in pending_log_tasks_for_user(int(si.id), local_day=self.MONDAY)
+        )
+
+    def test_log_popup_on_login(self, client):
+        """登录弹窗/待办页要带上「今天要写的日志」，写完就消失。"""
+        seed = get_seed()
+        p = self._project("ProjLogPopup", ["wang", "si"])
+        si = _db.session.get(User, seed["users"]["si"])
+        today = local_now().date()
+        _db.session.add(
+            ProjectLogRule(
+                project_id=p.id, user_id=si.id, weekdays=str(today.isoweekday()),
+                created_by_user_id=seed["users"]["admin"],
+            )
+        )
+        _db.session.commit()
+
+        html = login(client, "si").get_data(as_text=True)  # 登录后第一次打开页面
+        assert "pendingApprovalModal" in html
+        assert "今天要写的日志" in html
+        assert f"/projects/{p.id}/logs/new" in html
+        assert "去写日志" in html
+
+        html2 = client.get("/approvals").get_data(as_text=True)
+        assert "今天要写的日志" in html2
+        assert f"/projects/{p.id}/logs/new" in html2
+
+        # 今天写完日志 → 不再出现
+        _db.session.add(
+            ProjectUpdate(
+                project_id=p.id, body="今天的日志",
+                created_by_user_id=si.id, created_at=_utcnow(),
+            )
+        )
+        _db.session.commit()
+        client.post("/logout")
+        html3 = login(client, "si").get_data(as_text=True)
+        assert f"/projects/{p.id}/logs/new" not in html3
 
 
 class TestUserListFilters:

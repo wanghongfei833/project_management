@@ -22,6 +22,16 @@
     </div>
   {% endif %}
 
+  {% if log_todo_count %}
+    <div class="alert alert-warning alert-dismissible fade show shadow-sm d-flex justify-content-between align-items-center">
+      <div>
+        <i class="bi bi-journal-text me-2"></i>今天有 <strong>{{ log_todo_count }}</strong> 篇日志要写，还没写。
+      </div>
+      <a class="btn btn-sm btn-warning" href="{{ url_for('main.approvals_list') }}">去写日志</a>
+      <button type="button" class="btn-close ms-2" data-bs-dismiss="alert" aria-label="关闭"></button>
+    </div>
+  {% endif %}
+
   <div class="row g-3 mb-4">
     <div class="col-md-3">
       <div class="card stat-card stat-card-income">
