@@ -20,6 +20,8 @@ from .sms import (
     send_sms,
     sms_config,
     sms_configured,
+    allowed_phones,
+    mask_phone,
 )
 
 ALERT_AFTER = timedelta(hours=6)
@@ -80,10 +82,12 @@ def build_alert_plans(
     skipped = {
         "no_phone": 0,
         "invalid_phone": 0,
+        "not_allowed": 0,
         "no_pending": 0,
         "not_overdue": 0,
         "cooling": 0,
     }
+    allow = allowed_phones()
 
     query = User.query.filter(User.is_active.is_(True))
     if user_id:
@@ -96,6 +100,9 @@ def build_alert_plans(
             continue
         if not is_valid_phone(phone):
             skipped["invalid_phone"] += 1
+            continue
+        if allow and phone not in allow:
+            skipped["not_allowed"] += 1
             continue
 
         items = pending_items_for_user(
@@ -257,6 +264,7 @@ def send_test_sms(phone: str, number: int = 1, *, actor: User | None = None) -> 
 def sms_status() -> dict:
     """给管理页展示的配置状态（不暴露密钥，只显示是否配置）。"""
     cfg = sms_config()
+    allow = allowed_phones()
     return {
         "configured": sms_configured(cfg),
         "sign_name": cfg["sign_name"],
@@ -266,4 +274,6 @@ def sms_status() -> dict:
         "has_access_key_secret": bool(cfg["access_key_secret"]),
         "alert_after_hours": ALERT_AFTER.total_seconds() / 3600,
         "resend_every_hours": RESEND_EVERY.total_seconds() / 3600,
+        "test_mode": bool(allow),
+        "allow_phones": [mask_phone(p) for p in sorted(allow)],
     }

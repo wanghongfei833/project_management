@@ -57,7 +57,8 @@ def main() -> int:
         sk = summary["skipped"]
         print(
             "[summary] 命中 {plans} 人，成功 {sent} 条，失败 {failed} 条；"
-            "跳过：没手机号 {no_phone}、号码不合法 {invalid_phone}、今天已提醒 {already_reminded}".format(
+            "跳过：没手机号 {no_phone}、号码不合法 {invalid_phone}、不在测试白名单 {not_allowed}、"
+            "今天已提醒 {already_reminded}".format(
                 plans=len(summary["plans"]), sent=summary["sent"], failed=summary["failed"], **sk
             )
         )

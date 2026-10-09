@@ -13,6 +13,16 @@
     </span>
   </div>
 
+  {% if status_info.test_mode %}
+    <div class="alert alert-info py-2 small mb-3">
+      <i class="bi bi-broadcast me-1"></i>
+      <strong>测试模式</strong>：自动提醒目前只发给
+      {% for p in status_info.allow_phones %}<code>{{ p }}</code>{% if not loop.last %}、{% endif %}{% endfor %}
+      （由环境变量 <code>ALIYUN_SMS_ALLOW_PHONES</code> 控制）。要全量放开，清空该变量并重启服务即可。
+      「发送测试短信」不受此限制。
+    </div>
+  {% endif %}
+
   <div class="card mb-4">
     <div class="card-body">
       <div class="row g-3 align-items-start">

@@ -43,6 +43,29 @@ def is_valid_phone(raw) -> bool:
     return bool(_PHONE_RE.match(normalize_phone(raw)))
 
 
+def allowed_phones() -> set[str]:
+    """测试白名单：``ALIYUN_SMS_ALLOW_PHONES`` 非空时，自动提醒只发给这些号码。
+
+    例如 ``ALIYUN_SMS_ALLOW_PHONES=15682527196``：先只给一个人试，确认没问题
+    再清空这个变量全量放开。留空/不设置＝不限制。
+    """
+    raw = os.environ.get("ALIYUN_SMS_ALLOW_PHONES") or ""
+    phones = set()
+    for part in re.split(r"[,，;；\s]+", raw):
+        p = normalize_phone(part)
+        if p:
+            phones.add(p)
+    return phones
+
+
+def mask_phone(raw) -> str:
+    """156****7196（仅用于界面展示）。"""
+    p = normalize_phone(raw)
+    if len(p) != 11:
+        return p or "—"
+    return f"{p[:3]}****{p[-4:]}"
+
+
 def render_pending_text(number: int) -> str:
     return SMS_TEMPLATE_TEXT.format(number=int(number))
 

@@ -1083,6 +1083,26 @@ class TestLogRulesAndReminders:
         _db.session.commit()
         return p
 
+    @staticmethod
+    def _make_pending_item(project_id, requester_id, hours_old=7):
+        tx = Transaction(
+            project_id=project_id, status="pending", type="income",
+            amount_cents=100000, occur_date=date.today(), settled=True,
+            counterparty="client", created_by_user_id=requester_id,
+        )
+        _db.session.add(tx)
+        _db.session.flush()
+        req = TransactionCreateRequest(
+            transaction_id=tx.id, project_id=project_id, status="open",
+            created_by_user_id=requester_id,
+        )
+        _db.session.add(req)
+        _db.session.flush()
+        _db.session.add(TransactionCreateApproval(request_id=req.id, user_id=requester_id))
+        req.created_at = _utcnow() - timedelta(hours=hours_old)
+        _db.session.commit()
+        return tx, req
+
     def test_add_update_delete_rule(self, client):
         seed = get_seed()
         p = self._project("ProjLogRule", ["wang", "si"])
@@ -1230,6 +1250,42 @@ class TestLogRulesAndReminders:
         assert after == before
         send_log_reminders(local_day=self.MONDAY, force=True)
         assert sum(1 for phone, _n in calls if phone == "13800000002") == before + 1
+
+    def test_allow_phones_whitelist_limits_auto_sends(self, client, monkeypatch):
+        """ALIYUN_SMS_ALLOW_PHONES 有值时，自动提醒只发给白名单号码。"""
+        self._enable_sms(monkeypatch)
+        monkeypatch.setenv("ALIYUN_SMS_ALLOW_PHONES", "13900000000")  # 白名单不是 si 的号
+        seed = get_seed()
+        p = self._project("ProjLogWhite", ["wang", "si"])
+        si = _db.session.get(User, seed["users"]["si"])
+        si.phone = "13800000002"
+        _db.session.add(
+            ProjectLogRule(
+                project_id=p.id, user_id=si.id, weekdays="1",
+                created_by_user_id=seed["users"]["admin"],
+            )
+        )
+        _db.session.commit()
+
+        sender, calls = self._fake_sender()
+        monkeypatch.setattr("ledger_app.log_rules.send_sms", sender)
+        monkeypatch.setattr("ledger_app.sms_alerts.send_sms", sender)
+
+        # 日志提醒：命中但被白名单拦下
+        res = send_log_reminders(local_day=self.MONDAY)
+        assert not any(phone == "13800000002" for phone, _n in calls)
+        assert res["skipped"]["not_allowed"] >= 1
+
+        # 待办提醒同样受限
+        self._make_pending_item(p.id, seed["users"]["wang"], hours_old=7)
+        plans, skipped = build_alert_plans(user_id=si.id)
+        assert plans == [] and skipped["not_allowed"] == 1
+
+        # 把 si 加进白名单后就能发
+        monkeypatch.setenv("ALIYUN_SMS_ALLOW_PHONES", "13800000002")
+        # force=True：跳过 6 小时冷却（同一轮测试里前面刚给 si 发过记录）
+        plans2, _ = build_alert_plans(user_id=si.id, force=True)
+        assert len(plans2) == 1
 
 
 class TestUserListFilters:

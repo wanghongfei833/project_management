@@ -16,7 +16,13 @@ from .models import (
     SmsNotification,
     User,
 )
-from .sms import is_valid_phone, normalize_phone, send_sms, sms_configured
+from .sms import (
+    allowed_phones,
+    is_valid_phone,
+    normalize_phone,
+    send_sms,
+    sms_configured,
+)
 from .sms_alerts import record_sms
 
 WEEKDAY_LABELS = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}
@@ -140,7 +146,14 @@ def build_log_reminder_plans(
 ) -> tuple[list[LogReminderPlan], dict[str, int]]:
     """挑出「今天该写日志但没写」的人。"""
     local_day = local_day or local_now().date()
-    skipped = {"no_phone": 0, "invalid_phone": 0, "all_done": 0, "already_reminded": 0}
+    skipped = {
+        "no_phone": 0,
+        "invalid_phone": 0,
+        "not_allowed": 0,
+        "all_done": 0,
+        "already_reminded": 0,
+    }
+    allow = allowed_phones()
     plans: dict[int, LogReminderPlan] = {}
 
     for rule in due_rules_for_day(local_day):
@@ -171,6 +184,9 @@ def build_log_reminder_plans(
             continue
         if not is_valid_phone(plan.phone):
             skipped["invalid_phone"] += 1
+            continue
+        if allow and plan.phone not in allow:
+            skipped["not_allowed"] += 1
             continue
         if not force and _already_reminded(plan.user_id, local_day):
             skipped["already_reminded"] += 1

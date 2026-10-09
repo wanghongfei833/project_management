@@ -748,7 +748,8 @@ def sms_run_now():
             f"待办未满 6 小时 {skipped['not_overdue']} 人、"
             f"6 小时内已发过 {skipped['cooling']} 人、"
             f"当前无待办 {skipped['no_pending']} 人、"
-            f"未填手机号 {skipped['no_phone']} 人",
+            f"未填手机号 {skipped['no_phone']} 人、"
+            f"不在测试白名单 {skipped['not_allowed']} 人",
             "info",
         )
     return redirect(url_for("main.sms_list"))
