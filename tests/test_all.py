@@ -1469,3 +1469,62 @@ class TestUserDelete:
         # 删自己（admin2 是当前登录）也不行
         client.post(f"/users/{other_id}/delete", follow_redirects=True)
         assert _db.session.get(User, other_id) is not None
+
+
+class TestUndeliveredAmountDisplay:
+    """「未收到费用」在两种中介口径下都要用「剩余客户侧全额」。
+
+    回归用例：曾经用「含介绍费的应收全额 − 银行入账净额」相减，
+    在「中介先从客户款里扣（流水记净额）」的项目上会算出偏大的数字。
+    """
+
+    CARD_PREFIX = '<div class="fw-bold text-danger" style="font-size:1.1rem;">'
+
+    def _make_project(self, name, direction, ratio, contract_cents, received_cents):
+        seed = get_seed()
+        p = Project(
+            name=name,
+            expected_income_cents=contract_cents,
+            referral_ratio=Decimal(ratio),
+            broker_fee_mode="percent",
+            broker_fee_direction=direction,
+            status="open",
+            leader_user_id=seed["users"]["admin"],
+            planned_start_date=date(2026, 1, 1),
+            planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        _db.session.add(ProjectMember(project_id=p.id, user_id=seed["users"]["admin"]))
+        if received_cents:
+            _db.session.add(
+                Transaction(
+                    project_id=p.id, status="active", type="income",
+                    amount_cents=received_cents, occur_date=date.today(),
+                    settled=True, counterparty="业主[甲方]",
+                    created_by_user_id=seed["users"]["admin"],
+                )
+            )
+        _db.session.commit()
+        return p
+
+    def test_net_from_broker_shows_remaining_gross(self, client):
+        # 客户全额 100,000；中介 20%；流水按净额入账 60,000
+        # → 估算中介 15,000，剩余客户侧全额 = 100,000 − 75,000 = 25,000
+        p = self._make_project(
+            "ProjNetMode", "net_from_broker", "0.2", 10_000_000, 6_000_000
+        )
+        login(client, "admin", "admin123!")
+        html = client.get(f"/projects/{p.id}").get_data(as_text=True)
+        assert f"{self.CARD_PREFIX}¥ 25,000.00</div>" in html
+        # 旧算法（100,000 − 60,000 = 40,000）不能再出现
+        assert f"{self.CARD_PREFIX}¥ 40,000.00</div>" not in html
+
+    def test_we_pay_separate_still_shows_contract_minus_received(self, client):
+        # 我方另付：全额入账 60,000 / 合同 100,000 → 未收到 40,000（与旧算法一致）
+        p = self._make_project(
+            "ProjGrossMode", "we_pay_separate", "0.2", 10_000_000, 6_000_000
+        )
+        login(client, "admin", "admin123!")
+        html = client.get(f"/projects/{p.id}").get_data(as_text=True)
+        assert f"{self.CARD_PREFIX}¥ 40,000.00</div>" in html

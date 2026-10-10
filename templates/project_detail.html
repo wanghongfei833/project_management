@@ -151,7 +151,8 @@
             </div>
             <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">未收到费用</div>
-              <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ (expected_total_cents - received_cents)|money }}</div>
+              {# 未收到费用＝剩余「客户侧全额」：净额模式下不能拿含介绍费的应收去减净额收入 #}
+              <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ remaining_gross_cents|money }}</div>
             </div>
           </div>
           <hr style="border-top:2px dashed #dde1e5;" class="my-2">

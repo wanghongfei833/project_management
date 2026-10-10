@@ -76,8 +76,15 @@ class ProjectForm(FlaskForm):
     broker_fee_direction = SelectField(
         "中介款项方式",
         choices=[
-            (BROKER_DIR_NET_FROM_BROKER, "中介从客户款扣除（流水记净额，合同=我方口径）"),
-            (BROKER_DIR_WE_PAY, "我方另付介绍费（流水记客户全额）"),
+            # 注意：合同一律填「客户全额」，两种方式的差别只在流水记净额还是全额
+            (
+                BROKER_DIR_NET_FROM_BROKER,
+                "中介先从客户款里扣（我方到账＝净额；合同仍填客户全额）",
+            ),
+            (
+                BROKER_DIR_WE_PAY,
+                "客户全额打给我们，我们另付中介（流水记客户全额）",
+            ),
         ],
         validators=[DataRequired()],
     )
