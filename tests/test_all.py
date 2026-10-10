@@ -1528,3 +1528,111 @@ class TestUndeliveredAmountDisplay:
         login(client, "admin", "admin123!")
         html = client.get(f"/projects/{p.id}").get_data(as_text=True)
         assert f"{self.CARD_PREFIX}¥ 40,000.00</div>" in html
+
+
+class TestLogicAuditFixes:
+    """代码审计发现的三个逻辑问题（2026-10-10 修复）的回归用例。"""
+
+    def test_dividend_cash_balance_ignores_pending_transactions(self, client):
+        """分红前的「可用结余」只能算已生效流水。"""
+        from ledger_app.routes import _dividend_cash_balance_cents
+
+        seed = get_seed()
+        p = Project(
+            name="ProjCashCheck", expected_income_cents=0,
+            broker_fee_mode="percent", broker_fee_direction="we_pay_separate",
+            referral_ratio=Decimal("0"), status="ended",
+            ended_at=_utcnow(),
+            leader_user_id=seed["users"]["admin"],
+            planned_start_date=date(2026, 1, 1), planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        # 已生效收入 1,000；待审收入 5,000（不该算）；待审支出 3,000（不该算）
+        _db.session.add(Transaction(
+            project_id=p.id, status="active", type="income", amount_cents=100_000,
+            occur_date=date.today(), settled=True, counterparty="业主[甲方]",
+            created_by_user_id=seed["users"]["admin"]))
+        _db.session.add(Transaction(
+            project_id=p.id, status="pending", type="income", amount_cents=500_000,
+            occur_date=date.today(), settled=True, counterparty="业主[甲方]",
+            created_by_user_id=seed["users"]["admin"]))
+        _db.session.add(Transaction(
+            project_id=p.id, status="pending", type="expense", amount_cents=300_000,
+            occur_date=date.today(), settled=True, counterparty="供应商",
+            created_by_user_id=seed["users"]["admin"]))
+        _db.session.commit()
+
+        assert _dividend_cash_balance_cents(int(p.id)) == 100_000
+
+    def test_earnings_ignores_unsettled_payments(self, client):
+        """个人收入页只统计已到账（settled）的项目人员报酬。"""
+        seed = get_seed()
+        si = _db.session.get(User, seed["users"]["si"])
+        p = Project(
+            name="ProjEarningSettle", expected_income_cents=0,
+            broker_fee_mode="percent", broker_fee_direction="we_pay_separate",
+            referral_ratio=Decimal("0"), status="open",
+            leader_user_id=si.id,
+            planned_start_date=date(2026, 1, 1), planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        _db.session.add(ProjectMember(project_id=p.id, user_id=si.id))
+        _db.session.add(Transaction(
+            project_id=p.id, status="active", type="expense", amount_cents=123_400,
+            occur_date=date.today(), settled=True, counterparty="项目人员",
+            recipient_user_id=si.id, created_by_user_id=seed["users"]["admin"]))
+        _db.session.add(Transaction(
+            project_id=p.id, status="active", type="expense", amount_cents=567_800,
+            occur_date=date.today(), settled=False, counterparty="项目人员",
+            recipient_user_id=si.id, created_by_user_id=seed["users"]["admin"]))
+        _db.session.commit()
+
+        login(client, "si")
+        html = client.get("/earnings?all=1").get_data(as_text=True)
+        assert "1,234.00" in html       # 已到账 → 计入
+        assert "5,678.00" not in html   # 未到账 → 不计入
+
+    def test_project_form_ended_status_sets_ended_at(self, client):
+        """编辑页选「已结束」要写成 ended + ended_at，而不是系统不认的 closed。"""
+        seed = get_seed()
+        p = Project(
+            name="ProjStatusForm", expected_income_cents=100_000,
+            broker_fee_mode="percent", broker_fee_direction="we_pay_separate",
+            referral_ratio=Decimal("0"), status="open",
+            leader_user_id=seed["users"]["admin"],
+            planned_start_date=date(2026, 1, 1), planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        _db.session.add(ProjectMember(project_id=p.id, user_id=seed["users"]["admin"]))
+        _db.session.commit()
+
+        base = {
+            "name": "ProjStatusForm",
+            "leader_user_id": seed["users"]["admin"],
+            "planned_start_date": "2026-01-01",
+            "planned_end_date": "2026-12-31",
+            "expected_income_yuan": "1000.00",
+            "broker_fee_mode": "percent",
+            "broker_fee_direction": "we_pay_separate",
+            "referral_ratio_percent": "0",
+            "broker_fixed_fee_yuan": "0",
+            "parent_project_id": 0,
+            "can_dividend": 1,
+            "member_user_ids": [seed["users"]["admin"]],
+        }
+        login(client, "admin", "admin123!")
+        client.post(f"/projects/{p.id}/edit", data=dict(base, status="ended"),
+                    follow_redirects=True)
+        _db.session.refresh(p)
+        assert p.status == "ended"
+        assert p.ended_at is not None
+
+        # 改回进行中要清掉 ended_at
+        client.post(f"/projects/{p.id}/edit", data=dict(base, status="open"),
+                    follow_redirects=True)
+        _db.session.refresh(p)
+        assert p.status == "open"
+        assert p.ended_at is None

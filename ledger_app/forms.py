@@ -95,7 +95,10 @@ class ProjectForm(FlaskForm):
         validators=[Optional(), NumberRange(min=0)],
     )
     status = SelectField(
-        "状态", choices=[("open", "进行中"), ("closed", "已结束")], validators=[DataRequired()]
+        # 只能填系统认识的两种：open / ended（曾出现 "closed" 这种写了但系统不认的状态）
+        "状态",
+        choices=[("open", "进行中"), ("ended", "已结束（终止）")],
+        validators=[DataRequired()],
     )
     note = TextAreaField("备注", validators=[Optional(), Length(max=2000)])
     parent_project_id = SelectField("隶属于（父项目）", coerce=int, validators=[Optional()])

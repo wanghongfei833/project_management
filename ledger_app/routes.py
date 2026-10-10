@@ -182,6 +182,46 @@ def _log_project_activity(
     )
 
 
+def _dividend_cash_balance_cents(project_id: int) -> int:
+    """项目当前可用现金（已到账、已生效、未作废）。
+
+    注意要带 ``status == "active"``：待审流水不该参与可分配现金，
+    否则一条待审支出会把可分红额度误压小、一条待审收入会放大可用现金。
+    """
+    def _sum(tx_type: str) -> int:
+        return int(
+            db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+            .filter(
+                Transaction.project_id == int(project_id),
+                Transaction.type == tx_type,
+                Transaction.settled.is_(True),
+                Transaction.is_void.is_(False),
+                Transaction.status == "active",
+            )
+            .scalar()
+            or 0
+        )
+
+    return _sum(TransactionType.INCOME.value) - _sum(TransactionType.EXPENSE.value)
+
+
+def _apply_project_status(p: Project, new_status: str) -> None:
+    """只接受 open/ended；切到 ended 补 ended_at，切回 open 清空。
+
+    历史上表单里有过 "closed" 选项，但全站判定都用 "ended"，写进去会变成
+    「看起来已结束、系统仍当进行中」的脏状态，这里统一兜住。
+    """
+    status = (new_status or "open").strip()
+    if status not in ("open", "ended"):
+        status = "ended" if status == "closed" else "open"
+    if status == "ended":
+        if p.ended_at is None or p.status != "ended":
+            p.ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    else:
+        p.ended_at = None
+    p.status = status
+
+
 def _dividend_remaining_cents(project: Project) -> int:
     """计算项目的剩余可分红额度。"""
     pid = int(project.id)
@@ -1242,11 +1282,13 @@ def projects_new():
             broker_fee_mode=mode,
             broker_fee_direction=direction,
             broker_fixed_fee_cents=int(fixed_cents),
-            status=form.status.data,
+            status="open",
             note=form.note.data or None,
             parent_project_id=parent_id,
             can_dividend=can_div,
         )
+        # 表单可选「已结束」；统一走 open/ended 两种状态并维护 ended_at
+        _apply_project_status(p, form.status.data)
         db.session.add(p)
         db.session.flush()
 
@@ -1403,7 +1445,7 @@ def projects_edit(project_id: int):
         p.broker_fee_mode = mode
         p.broker_fee_direction = direction
         p.broker_fixed_fee_cents = int(fixed_cents)
-        p.status = form.status.data
+        _apply_project_status(p, form.status.data)
         p.note = form.note.data or None
         parent_id = form.parent_project_id.data
         p.parent_project_id = parent_id if parent_id and parent_id != 0 else None
@@ -2586,18 +2628,8 @@ def project_dividend_post(project_id: int):
         flash(f"分红额度已发生变化（剩余 ¥{format_cents(latest_div_remaining)}），请重新提交", "danger")
         return redirect(url_for("main.project_dividend_page", project_id=p.id))
 
-    # 校验现金结余
-    income_settled = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-        .filter(Transaction.project_id == p.id, Transaction.type == TransactionType.INCOME.value,
-                Transaction.settled.is_(True), Transaction.is_void.is_(False)).scalar() or 0
-    )
-    expense_settled = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-        .filter(Transaction.project_id == p.id, Transaction.type == TransactionType.EXPENSE.value,
-                Transaction.settled.is_(True), Transaction.is_void.is_(False)).scalar() or 0
-    )
-    cash_balance = income_settled - expense_settled
+    # 校验现金结余（只算已生效流水，避免待审流水把额度算错）
+    cash_balance = _dividend_cash_balance_cents(int(p.id))
     if total_amt > cash_balance:
         flash(f"分红金额超出项目当前可用结余（结余 ¥{format_cents(cash_balance)}）", "danger")
         return redirect(url_for("main.project_dividend_page", project_id=p.id))
@@ -3493,7 +3525,8 @@ def personal_earnings():
             db.session.query(Transaction.project_id,
                 db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
             .filter(Transaction.recipient_user_id == u.id, Transaction.is_void.is_(False),
-                    Transaction.status == "active", Transaction.type == "expense")
+                    Transaction.status == "active", Transaction.settled.is_(True),
+                    Transaction.type == "expense")
             .group_by(Transaction.project_id).all())
         div_payments = (
             db.session.query(ProjectDividendDistribution.project_id,
