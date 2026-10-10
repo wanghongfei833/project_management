@@ -225,6 +225,8 @@ project_management/
 
 ## 部署（生产环境）
 
+> 连接服务器、更新代码、备份、排错的完整说明见 [docs/aliyun-ops.md](docs/aliyun-ops.md)。
+
 ### 阿里云服务器
 
 | 项目 | 值 |
