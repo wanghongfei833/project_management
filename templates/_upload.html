@@ -1,0 +1,97 @@
+{# 通用附件上传框：支持拖拽、Ctrl+V 粘贴截图、多选，并在提交前就显示缩略图。 #}
+{% macro upload_field(input_id, extra_hint="") %}
+  <div class="upload-zone" id="{{ input_id }}-zone">
+    <input class="form-control" type="file" name="attachments" id="{{ input_id }}" multiple>
+    <div class="form-text mb-0 mt-1">
+      可<strong>拖拽文件</strong>到这里，或直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> <strong>粘贴截图</strong>；支持多选。{{ extra_hint }}
+    </div>
+    <div class="row g-2 mt-2" id="{{ input_id }}-preview"></div>
+  </div>
+  <script>
+  (function () {
+    var input = document.getElementById({{ input_id|tojson }});
+    var zone = document.getElementById({{ input_id|tojson }} + "-zone");
+    var preview = document.getElementById({{ input_id|tojson }} + "-preview");
+    if (!input || !zone || !preview || input.dataset.dropzoneReady) return;
+    input.dataset.dropzoneReady = "1";
+
+    var dt = new DataTransfer();
+    function isImage(f) { return (f.type || "").indexOf("image/") === 0 || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name || ""); }
+    function sync() { input.files = dt.files; }
+    function files() { return Array.prototype.slice.call(dt.files); }
+
+    function render() {
+      preview.innerHTML = "";
+      files().forEach(function (f, idx) {
+        var col = document.createElement("div");
+        col.className = "col-6 col-md-4 col-lg-3";
+        var box = document.createElement("div");
+        box.className = "border rounded p-1 position-relative h-100";
+        if (isImage(f)) {
+          var img = document.createElement("img");
+          img.src = URL.createObjectURL(f);
+          img.className = "w-100 rounded";
+          img.style.height = "80px";
+          img.style.objectFit = "cover";
+          box.appendChild(img);
+        } else {
+          var icon = document.createElement("div");
+          icon.className = "d-flex align-items-center justify-content-center";
+          icon.style.height = "80px";
+          icon.textContent = "📎";
+          box.appendChild(icon);
+        }
+        var name = document.createElement("div");
+        name.className = "small text-truncate mt-1";
+        name.textContent = f.name;
+        name.title = f.name;
+        box.appendChild(name);
+        var del = document.createElement("button");
+        del.type = "button";
+        del.className = "btn btn-sm btn-outline-danger position-absolute top-0 end-0 m-1 py-0 px-1";
+        del.textContent = "×";
+        del.title = "移除这个文件";
+        del.addEventListener("click", function () { removeAt(idx); });
+        box.appendChild(del);
+        col.appendChild(box);
+        preview.appendChild(col);
+      });
+    }
+    function addFiles(list) {
+      if (!list || !list.length) return;
+      Array.prototype.forEach.call(list, function (f) { dt.items.add(f); });
+      sync();
+      render();
+    }
+    function removeAt(idx) {
+      var next = new DataTransfer();
+      files().forEach(function (f, i) { if (i !== idx) next.items.add(f); });
+      dt = next;
+      sync();
+      render();
+    }
+
+    input.addEventListener("change", function () {
+      var picked = input.files;
+      dt = new DataTransfer();
+      addFiles(picked);
+    });
+    ["dragenter", "dragover"].forEach(function (ev) {
+      zone.addEventListener(ev, function (e) { e.preventDefault(); zone.classList.add("dragover"); });
+    });
+    ["dragleave", "drop"].forEach(function (ev) {
+      zone.addEventListener(ev, function (e) { e.preventDefault(); zone.classList.remove("dragover"); });
+    });
+    zone.addEventListener("drop", function (e) {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+    });
+    document.addEventListener("paste", function (e) {
+      if (!document.body.contains(zone)) return;
+      var cb = e.clipboardData;
+      if (!cb || !cb.files || !cb.files.length) return;
+      e.preventDefault();
+      addFiles(cb.files);
+    });
+  })();
+  </script>
+{% endmacro %}

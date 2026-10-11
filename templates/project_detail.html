@@ -620,31 +620,22 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
                   {% endif %}
                 </div>
               {% elif t.attachments %}
-                <a href="#" onclick="event.preventDefault(); document.getElementById('attachments-modal-{{ t.id }}').classList.add('show'); document.getElementById('attachments-modal-{{ t.id }}').style.display='block'; document.getElementById('attachments-modal-{{ t.id }}').removeAttribute('aria-hidden'); return false;">查看凭证</a>
-                <div id="attachments-modal-{{ t.id }}" class="modal fade" tabindex="-1">
-                  <div class="modal-dialog modal-sm modal-dialog-centered">
-                    <div class="modal-content">
-                      <div class="modal-header">
-                        <div class="modal-title small fw-semibold">凭证列表</div>
-                        <button type="button" class="btn-close btn-sm" onclick="document.getElementById('attachments-modal-{{ t.id }}').classList.remove('show'); document.getElementById('attachments-modal-{{ t.id }}').style.display='none';" aria-label="关闭"></button>
-                      </div>
-                      <div class="modal-body py-2">
-                        {% for a in t.attachments %}
-                          <div class="mb-1">
-                            <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank" class="btn btn-sm btn-outline-secondary w-100 text-start">
-                              {% if a.filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.gif')) %}
-                                <span class="me-1">🖼️</span>
-                              {% else %}
-                                <span class="me-1">📎</span>
-                              {% endif %}
-                              {{ a.filename }}
-                            </a>
-                          </div>
-                        {% endfor %}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                {# 点开右侧抽屉看凭证；图片直接给缩略图预览 #}
+                {% set att_items = [] %}
+                {% for a in t.attachments %}
+                  {% set _ = att_items.append({"name": a.filename, "url": url_for("main.uploads", filename=a.stored_path)}) %}
+                {% endfor %}
+                <a href="#" class="text-decoration-none d-inline-flex align-items-center gap-1"
+                   data-receipt-title="流水 #{{ t.id }} 的凭证"
+                   data-receipts='{{ att_items|tojson }}'>
+                  {% for a in t.attachments[:3] %}
+                    {% if a.filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.gif')) %}
+                      <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" alt=""
+                           style="height:26px;width:26px;object-fit:cover;border-radius:4px;border:1px solid #e8ecf0;">
+                    {% endif %}
+                  {% endfor %}
+                  <span>查看凭证{% if t.attachments|length > 1 %} ({{ t.attachments|length }}){% endif %}</span>
+                </a>
               {% else %}
                 <span class="text-muted">无</span>
               {% endif %}

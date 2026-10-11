@@ -124,6 +124,19 @@
       .sub-tree .badge { font-size: .6rem !important; }
       .member-badge { font-size: .85rem; padding: .35em .65em; }
       hr { opacity: 0.15; }
+
+      /* ===== 附件上传框（拖拽 / 粘贴） ===== */
+      .upload-zone {
+        border: 1.5px dashed #b9c1c8; border-radius: 10px;
+        padding: .6rem .7rem; background: #fff; transition: var(--transition-speed);
+      }
+      .upload-zone.dragover { border-color: var(--brand-primary); background: rgba(26,58,92,0.05); }
+      .upload-zone kbd { font-size: .78rem; }
+
+      /* ===== 凭证抽屉 ===== */
+      #receiptDrawer .receipt-thumb { background: #fff; cursor: zoom-in; transition: var(--transition-speed); }
+      #receiptDrawer .receipt-thumb:hover { box-shadow: 0 4px 14px rgba(0,0,0,.14); }
+      #receiptDrawer img { max-height: 70vh; object-fit: contain; }
     </style>
   </head>
   <body>
@@ -233,5 +246,78 @@
         });
       </script>
     {% endif %}
+
+    <!-- 凭证抽屉：右侧滑出，缩略图点开看大图 -->
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="receiptDrawer" aria-labelledby="receiptDrawerTitle">
+      <div class="offcanvas-header border-bottom">
+        <h5 class="offcanvas-title" id="receiptDrawerTitle">凭证</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="关闭"></button>
+      </div>
+      <div class="offcanvas-body" id="receiptDrawerBody"></div>
+    </div>
+    <script>
+      (function () {
+        var el = document.getElementById('receiptDrawer');
+        if (!el || !window.bootstrap) return;
+        var titleEl = document.getElementById('receiptDrawerTitle');
+        var bodyEl = document.getElementById('receiptDrawerBody');
+        var drawer = new bootstrap.Offcanvas(el);
+        var current = [];
+
+        function isImage(name) { return /\.(png|jpe?g|webp|gif|bmp)$/i.test(name || ''); }
+        function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+        function listHtml(items) {
+          if (!items.length) return '<div class="text-muted">没有凭证</div>';
+          var html = '<div class="row g-2">';
+          items.forEach(function (it, idx) {
+            html += '<div class="col-6"><button type="button" class="btn p-1 border rounded w-100 receipt-thumb" data-idx="' + idx + '">';
+            if (isImage(it.name)) {
+              html += '<img src="' + esc(it.url) + '" class="w-100 rounded" style="height:104px;object-fit:cover;" alt="">';
+            } else {
+              html += '<div class="d-flex align-items-center justify-content-center" style="height:104px;font-size:1.6rem;">📎</div>';
+            }
+            html += '<div class="small text-truncate mt-1">' + esc(it.name) + '</div></button></div>';
+          });
+          return html + '</div>';
+        }
+
+        function oneHtml(it) {
+          var bar = '<div class="d-flex gap-2 mb-2">' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary" id="receiptBack">← 返回列表</button>' +
+            '<a class="btn btn-sm btn-outline-primary" href="' + esc(it.url) + '" target="_blank" rel="noopener">在新标签打开</a>' +
+            '</div>';
+          if (isImage(it.name)) {
+            return bar + '<img src="' + esc(it.url) + '" class="img-fluid rounded border">';
+          }
+          return bar + '<div class="alert alert-secondary mb-0">该文件不是图片，点上面的按钮打开。</div>';
+        }
+
+        function renderList() { bodyEl.innerHTML = listHtml(current); }
+
+        window.openReceiptDrawer = function (title, items) {
+          current = items || [];
+          titleEl.textContent = title || '凭证';
+          renderList();
+          drawer.show();
+        };
+
+        bodyEl.addEventListener('click', function (e) {
+          var thumb = e.target.closest ? e.target.closest('.receipt-thumb') : null;
+          if (thumb) { bodyEl.innerHTML = oneHtml(current[+thumb.dataset.idx] || {}); return; }
+          if (e.target && e.target.id === 'receiptBack') { renderList(); }
+        });
+
+        document.addEventListener('click', function (e) {
+          var trigger = e.target.closest ? e.target.closest('[data-receipts]') : null;
+          if (!trigger) return;
+          e.preventDefault();
+          var items = [];
+          try { items = JSON.parse(trigger.getAttribute('data-receipts')) || []; } catch (err) { items = []; }
+          window.openReceiptDrawer(trigger.getAttribute('data-receipt-title'), items);
+        });
+      })();
+    </script>
   </body>
 </html>

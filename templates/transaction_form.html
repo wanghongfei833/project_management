@@ -44,8 +44,9 @@
           {{ form.note(class="form-control", rows="3") }}
         </div>
         <div class="col-12">
-          <label class="form-label">上传凭证（可多选）</label>
-          <input class="form-control" type="file" name="attachments" multiple>
+            {% from "_upload.html" import upload_field %}
+            <label class="form-label">上传凭证</label>
+            {{ upload_field("attachments_new", "图片、PDF、截图都行。") }}
         </div>
       </div>
 

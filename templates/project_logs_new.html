@@ -21,8 +21,9 @@
         {{ form.body(class="form-control", rows="8", placeholder="具体做了什么、遇到的问题、下一步计划…") }}
       </div>
       <div class="mb-3">
-        <label class="form-label">附件（图片/文件，可多选）</label>
-        <input class="form-control" type="file" name="attachments" multiple>
+    {% from "_upload.html" import upload_field %}
+    <label class="form-label">附件（图片/文件）</label>
+    {{ upload_field("attachments_log", "写日志时可直接粘贴截图。") }}
       </div>
       <button class="btn btn-primary" type="submit">提交日志</button>
       <a class="btn btn-outline-secondary ms-2" href="{{ url_for('main.project_logs', project_id=project.id) }}">取消</a>
