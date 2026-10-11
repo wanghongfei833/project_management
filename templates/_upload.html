@@ -1,76 +1,123 @@
-{# 通用附件上传框：支持拖拽、Ctrl+V 粘贴截图、多选，并在提交前就显示缩略图。 #}
+{# 通用附件上传区：大号点击/拖拽区 + Ctrl+V 粘贴 + 提交前缩略图预览（点图放大）+ 清空。
+   用法：{% from "_upload.html" import upload_field %} 然后 {{ upload_field("attachments_x") }} #}
 {% macro upload_field(input_id, extra_hint="") %}
   <div class="upload-zone" id="{{ input_id }}-zone">
-    <input class="form-control" type="file" name="attachments" id="{{ input_id }}" multiple>
-    <div class="form-text mb-0 mt-1">
-      可<strong>拖拽文件</strong>到这里，或直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> <strong>粘贴截图</strong>；支持多选。{{ extra_hint }}
+    <input class="visually-hidden" type="file" name="attachments" id="{{ input_id }}" multiple>
+    <div class="upload-cta" id="{{ input_id }}-cta">
+      <div class="upload-icon">📎</div>
+      <div class="upload-title">点击选择文件，或把文件拖到这里</div>
+      <div class="upload-sub">
+        也可以直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴截图 · 支持多选 · 单个文件 ≤ 25MB
+        {%- if extra_hint %}<br>{{ extra_hint }}{% endif %}
+      </div>
+    </div>
+    <div class="d-none align-items-center gap-2 small text-muted mt-2" id="{{ input_id }}-meta">
+      <span id="{{ input_id }}-count"></span>
+      <button type="button" class="btn btn-sm btn-outline-secondary py-0" id="{{ input_id }}-clear">清空</button>
     </div>
     <div class="row g-2 mt-2" id="{{ input_id }}-preview"></div>
+    <div class="small text-danger mt-1 d-none" id="{{ input_id }}-warn">
+      所选文件合计超过 25MB，提交会失败，请减少文件或先压缩。
+    </div>
   </div>
   <script>
   (function () {
-    var input = document.getElementById({{ input_id|tojson }});
-    var zone = document.getElementById({{ input_id|tojson }} + "-zone");
-    var preview = document.getElementById({{ input_id|tojson }} + "-preview");
-    if (!input || !zone || !preview || input.dataset.dropzoneReady) return;
-    input.dataset.dropzoneReady = "1";
-
+    var id = {{ input_id|tojson }};
+    var input = document.getElementById(id);
+    if (!input || input.dataset.uploadReady) return;
+    input.dataset.uploadReady = "1";
+    var zone = document.getElementById(id + "-zone");
+    var preview = document.getElementById(id + "-preview");
+    var meta = document.getElementById(id + "-meta");
+    var countEl = document.getElementById(id + "-count");
+    var clearBtn = document.getElementById(id + "-clear");
+    var warnEl = document.getElementById(id + "-warn");
+    var MAX_TOTAL = 25 * 1024 * 1024;
     var dt = new DataTransfer();
-    function isImage(f) { return (f.type || "").indexOf("image/") === 0 || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name || ""); }
+
+    function isImage(f) {
+      return (f.type || "").indexOf("image/") === 0 || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name || "");
+    }
+    function list() { return Array.prototype.slice.call(dt.files); }
+    function human(n) {
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
+      return (n / 1024 / 1024).toFixed(1) + " MB";
+    }
     function sync() { input.files = dt.files; }
-    function files() { return Array.prototype.slice.call(dt.files); }
 
     function render() {
+      var files = list();
       preview.innerHTML = "";
-      files().forEach(function (f, idx) {
+      var total = 0;
+      files.forEach(function (f, idx) {
+        total += f.size;
         var col = document.createElement("div");
         col.className = "col-6 col-md-4 col-lg-3";
         var box = document.createElement("div");
-        box.className = "border rounded p-1 position-relative h-100";
+        box.className = "upload-thumb border rounded p-1 position-relative";
+        box.dataset.idx = idx;
+        box.title = "点击预览：" + f.name;
         if (isImage(f)) {
           var img = document.createElement("img");
           img.src = URL.createObjectURL(f);
           img.className = "w-100 rounded";
-          img.style.height = "80px";
+          img.style.height = "96px";
           img.style.objectFit = "cover";
           box.appendChild(img);
         } else {
           var icon = document.createElement("div");
           icon.className = "d-flex align-items-center justify-content-center";
-          icon.style.height = "80px";
+          icon.style.height = "96px";
+          icon.style.fontSize = "1.6rem";
           icon.textContent = "📎";
           box.appendChild(icon);
         }
         var name = document.createElement("div");
         name.className = "small text-truncate mt-1";
         name.textContent = f.name;
-        name.title = f.name;
         box.appendChild(name);
         var del = document.createElement("button");
         del.type = "button";
         del.className = "btn btn-sm btn-outline-danger position-absolute top-0 end-0 m-1 py-0 px-1";
         del.textContent = "×";
         del.title = "移除这个文件";
-        del.addEventListener("click", function () { removeAt(idx); });
+        del.addEventListener("click", function (e) { e.stopPropagation(); removeAt(idx); });
         box.appendChild(del);
         col.appendChild(box);
         preview.appendChild(col);
       });
+      if (files.length) {
+        meta.classList.remove("d-none");
+        meta.classList.add("d-flex");
+        countEl.textContent = "已选 " + files.length + " 个文件 · 共 " + human(total);
+      } else {
+        meta.classList.add("d-none");
+        meta.classList.remove("d-flex");
+        countEl.textContent = "";
+      }
+      if (warnEl) warnEl.classList.toggle("d-none", total <= MAX_TOTAL);
     }
-    function addFiles(list) {
-      if (!list || !list.length) return;
-      Array.prototype.forEach.call(list, function (f) { dt.items.add(f); });
+
+    function addFiles(listLike) {
+      if (!listLike || !listLike.length) return;
+      Array.prototype.forEach.call(listLike, function (f) { dt.items.add(f); });
       sync();
       render();
     }
     function removeAt(idx) {
       var next = new DataTransfer();
-      files().forEach(function (f, i) { if (i !== idx) next.items.add(f); });
+      list().forEach(function (f, i) { if (i !== idx) next.items.add(f); });
       dt = next;
       sync();
       render();
     }
 
+    // 点整个区域都能选文件（点缩略图/按钮除外）
+    zone.addEventListener("click", function (e) {
+      if (e.target.closest(".upload-thumb") || e.target.closest("button")) return;
+      input.click();
+    });
     input.addEventListener("change", function () {
       var picked = input.files;
       dt = new DataTransfer();
@@ -92,6 +139,19 @@
       e.preventDefault();
       addFiles(cb.files);
     });
+    preview.addEventListener("click", function (e) {
+      var box = e.target.closest(".upload-thumb");
+      if (!box || !window.openReceiptDrawer) return;
+      var items = list().map(function (f) { return { name: f.name, url: URL.createObjectURL(f) }; });
+      window.openReceiptDrawer("待上传的凭证（" + items.length + "）", items);
+    });
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        dt = new DataTransfer();
+        sync();
+        render();
+      });
+    }
   })();
   </script>
 {% endmacro %}

@@ -22,22 +22,53 @@
       {{ form.hidden_tag() }}
 
       {% if transaction.attachments %}
-        <div class="card mb-3">
-          <div class="card-body py-2">
-            <div class="fw-semibold small mb-2">已有凭证（可勾选删除）</div>
-            <ul class="list-unstyled mb-0 small">
-              {% for a in transaction.attachments %}
-                <li class="d-flex flex-wrap align-items-center gap-2 py-1 border-bottom">
-                  <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a>
-                  <div class="form-check ms-auto">
-                    <input class="form-check-input" type="checkbox" name="delete_attachment_ids" value="{{ a.id }}" id="del-att-{{ a.id }}">
-                    <label class="form-check-label text-danger" for="del-att-{{ a.id }}">删除</label>
+        <div class="mb-3">
+          <div class="fw-semibold small mb-1">已有凭证（{{ transaction.attachments|length }}）</div>
+          <div class="text-muted small mb-2">点缩略图可以放大看；点右上角 <span class="text-danger">×</span> 标记删除，再点一次取消。</div>
+          <div class="row g-2">
+            {% for a in transaction.attachments %}
+              {% set is_img = a.filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.gif')) %}
+              <div class="col-6 col-md-4 col-lg-3">
+                <div class="border rounded p-1 position-relative existing-att" data-att-card>
+                  <input class="d-none" type="checkbox" name="delete_attachment_ids" value="{{ a.id }}" id="del-att-{{ a.id }}">
+                  {% if is_img %}
+                    <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" class="w-100 rounded att-thumb"
+                         style="height:96px;object-fit:cover;cursor:zoom-in;" alt=""
+                         data-receipt-title="已有凭证"
+                         data-receipts='{{ [{"name": a.filename, "url": url_for("main.uploads", filename=a.stored_path)}]|tojson }}'>
+                  {% else %}
+                    <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank"
+                       class="d-flex align-items-center justify-content-center text-decoration-none" style="height:96px;font-size:1.6rem;">📎</a>
+                  {% endif %}
+                  <div class="small text-truncate mt-1" title="{{ a.filename }}">{{ a.filename }}</div>
+                  <button type="button" class="btn btn-sm btn-outline-danger position-absolute top-0 end-0 m-1 py-0 px-1" data-att-del>×</button>
+                  <div class="att-marked position-absolute top-0 start-0 w-100 d-none align-items-center justify-content-center rounded"
+                       style="height:96px;background:rgba(255,255,255,.72);">
+                    <span class="badge text-bg-danger">标记删除</span>
                   </div>
-                </li>
-              {% endfor %}
-            </ul>
+                </div>
+              </div>
+            {% endfor %}
           </div>
         </div>
+        <script>
+        document.querySelectorAll('[data-att-card]').forEach(function (card) {
+          var cb = card.querySelector('input[type=checkbox]');
+          var overlay = card.querySelector('.att-marked');
+          function sync() {
+            var marked = cb.checked;
+            card.style.opacity = marked ? 0.55 : 1;
+            overlay.classList.toggle('d-none', !marked);
+            overlay.classList.toggle('d-flex', marked);
+          }
+          card.querySelector('[data-att-del]').addEventListener('click', function (e) {
+            e.stopPropagation();
+            cb.checked = !cb.checked;
+            sync();
+          });
+          sync();
+        });
+        </script>
       {% endif %}
 
       <div class="row g-3">
