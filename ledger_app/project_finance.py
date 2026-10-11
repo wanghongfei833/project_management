@@ -109,7 +109,13 @@ def build_project_finance(
     *,
     expected_total_cents: int,
     received_settled_income_bank_cents: int,
+    broker_paid_cents: int = 0,
 ) -> dict[str, Any]:
+    """项目财务口径。
+
+    broker_paid_cents：**实际已支付**的中介费（支出流水，对方=中介费）。
+    用来算「未收净额」——还要收的钱里，扣掉还欠中介的那部分，才是我方真正能拿到手的现金。
+    """
     direction, mode, _F = _project_fee_fields(p)
     Eg, En, broker_contract = contract_expected_net_and_broker(p, expected_total_cents)
     Rn, Br = received_net_and_broker_estimated(
@@ -128,6 +134,13 @@ def build_project_finance(
         rem_gross = max(Eg - gross_eq_received, 0)
         rem_net = max(En - Rn, 0)
 
+    # 还欠中介多少：我方另付时＝介绍费总额 − 已付；中介先扣时我方到账已是净额，不欠
+    if direction == BROKER_DIR_WE_PAY:
+        broker_unpaid = max(int(broker_contract) - max(int(broker_paid_cents or 0), 0), 0)
+    else:
+        broker_unpaid = 0
+    rem_net_cash = max(int(rem_gross) - broker_unpaid, 0)
+
     return {
         "broker_fee_mode": mode,
         "broker_fee_direction": direction,
@@ -141,6 +154,10 @@ def build_project_finance(
         "broker_estimated_on_received_cents": Br,
         "remaining_gross_cents": rem_gross,
         "remaining_net_cents": rem_net,
+        "broker_paid_cents": max(int(broker_paid_cents or 0), 0),
+        "broker_unpaid_cents": broker_unpaid,
+        # 我方口径的「未收净额」：剩余应收 − 还欠中介费（现金视角）
+        "remaining_net_cash_cents": rem_net_cash,
     }
 
 

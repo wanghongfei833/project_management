@@ -1636,3 +1636,143 @@ class TestLogicAuditFixes:
         _db.session.refresh(p)
         assert p.status == "open"
         assert p.ended_at is None
+
+
+class TestFinanceModelImprovements:
+    """现金口径的「未收净额」、分红口径唯一实现、收入页北京时间边界。"""
+
+    @staticmethod
+    def _mk_project(name, **kw):
+        seed = get_seed()
+        p = Project(
+            name=name,
+            expected_income_cents=kw.get("expected", 0),
+            referral_ratio=Decimal(kw.get("ratio", "0")),
+            broker_fee_mode=kw.get("mode", "percent"),
+            broker_fee_direction=kw.get("direction", "we_pay_separate"),
+            broker_fixed_fee_cents=kw.get("fixed", 0),
+            status=kw.get("status", "open"),
+            ended_at=kw.get("ended_at"),
+            leader_user_id=seed["users"]["admin"],
+            planned_start_date=date(2026, 1, 1),
+            planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        _db.session.add(ProjectMember(project_id=p.id, user_id=seed["users"]["admin"]))
+        _db.session.commit()
+        return p
+
+    def test_remaining_net_cash_respects_paid_broker_fee(self):
+        """未收净额 = 剩余应收 − 还欠中介费；中介付清时就是剩余应收。"""
+        from ledger_app.project_finance import build_project_finance
+
+        # 客户全额 42,000，中介 20% = 8,400，已收 40,000 → 剩余应收 2,000
+        p = self._mk_project("ProjNetCash", expected=4_200_000, ratio="0.2")
+        kw = dict(expected_total_cents=4_200_000, received_settled_income_bank_cents=4_000_000)
+
+        fin_unpaid = build_project_finance(p, broker_paid_cents=0, **kw)
+        assert fin_unpaid["remaining_gross_cents"] == 200_000
+        assert fin_unpaid["broker_unpaid_cents"] == 840_000
+        assert fin_unpaid["remaining_net_cash_cents"] == 0
+
+        fin_paid = build_project_finance(p, broker_paid_cents=840_000, **kw)
+        assert fin_paid["remaining_gross_cents"] == 200_000
+        assert fin_paid["broker_unpaid_cents"] == 0
+        assert fin_paid["remaining_net_cash_cents"] == 200_000  # 用户要的口径
+
+        # 中介只付了一部分：还欠 4,400 > 剩余 2,000 → 未收净额 0，但剩余应收仍是 2,000
+        fin_part = build_project_finance(p, broker_paid_cents=400_000, **kw)
+        assert fin_part["remaining_gross_cents"] == 200_000
+        assert fin_part["broker_unpaid_cents"] == 440_000
+        assert fin_part["remaining_net_cash_cents"] == 0
+
+    def test_detail_page_shows_net_cash_and_unpaid_broker(self, client):
+        seed = get_seed()
+        p = self._mk_project("ProjNetCashPage", expected=4_200_000, ratio="0.2")
+        _db.session.add(Transaction(
+            project_id=p.id, status="active", type="income", amount_cents=4_000_000,
+            occur_date=date.today(), settled=True, counterparty="业主[甲方]",
+            created_by_user_id=seed["users"]["admin"]))
+        # 中介只付了 4,000（还欠 4,400）
+        _db.session.add(Transaction(
+            project_id=p.id, status="active", type="expense", amount_cents=400_000,
+            occur_date=date.today(), settled=True, counterparty="中介费",
+            created_by_user_id=seed["users"]["admin"]))
+        _db.session.commit()
+
+        login(client, "admin", "admin123!")
+        html = client.get(f"/projects/{p.id}").get_data(as_text=True)
+        assert "未收净额（我方）" in html
+        assert "其中还要付中介 ¥4,400.00" in html
+        # 未收到费用（剩余应收）= 2,000；未收净额 = 0
+        card = '<div class="fw-bold text-danger" style="font-size:1.1rem;">¥ '
+        assert f"{card}2,000.00</div>" in html
+        assert f"{card}0.00</div>" in html
+
+    def test_dividend_metrics_is_single_source(self):
+        """分红三件套（基数/已分/剩余）由 dividends.dividend_metrics 统一算出。"""
+        from ledger_app.dividends import dividend_metrics
+
+        seed = get_seed()
+        p = self._mk_project("ProjDivMetrics", expected=0, ratio="0")
+        # 非分红支出 3,000；分红支出 2,000；分红明细 2,000
+        _db.session.add(Transaction(
+            project_id=p.id, status="active", type="expense", amount_cents=300_000,
+            occur_date=date.today(), settled=True, counterparty="供应商",
+            created_by_user_id=seed["users"]["admin"]))
+        _db.session.add(Transaction(
+            project_id=p.id, status="active", type="expense", amount_cents=200_000,
+            occur_date=date.today(), settled=True, counterparty="批量分红",
+            note="[DIVIDEND] 批量分红给 1 人",
+            created_by_user_id=seed["users"]["admin"]))
+        _db.session.add(ProjectDividendDistribution(
+            project_id=p.id, recipient_name="王洪飞", amount_cents=200_000,
+            created_by_user_id=seed["users"]["admin"]))
+        _db.session.commit()
+
+        dm = dividend_metrics(int(p.id), received_net_cents=1_000_000)
+        assert dm.expense_total_cents == 500_000
+        assert dm.dividend_expense_cents == 200_000
+        assert dm.paid_excl_dividend_cents == 300_000
+        assert dm.base_cents == 700_000
+        assert dm.paid_cents == 200_000
+        assert dm.remaining_cents == 500_000
+
+    def test_earnings_date_filter_uses_beijing_day(self, client):
+        """按终止日期筛选要按北京时间算，凌晨终止的项目不能算到前一天。"""
+        seed = get_seed()
+        si = _db.session.get(User, seed["users"]["si"])
+        # A：北京时间 10-09 22:00 终止（UTC 10-09 14:00）
+        pa = self._mk_project(
+            "ProjTzA", status="ended",
+            ended_at=datetime(2026, 10, 9, 14, 0, 0),
+        )
+        # B：北京时间 10-09 02:00 终止（UTC 10-08 18:00）—— 旧逻辑会把它算成 10-08
+        pb = self._mk_project(
+            "ProjTzB", status="ended",
+            ended_at=datetime(2026, 10, 8, 18, 0, 0),
+        )
+        # C：北京时间 10-08 18:00 终止（UTC 10-08 10:00）
+        pc = self._mk_project(
+            "ProjTzC", status="ended",
+            ended_at=datetime(2026, 10, 8, 10, 0, 0),
+        )
+        for p in (pa, pb, pc):
+            _db.session.add(Transaction(
+                project_id=p.id, status="active", type="expense", amount_cents=100_000,
+                occur_date=date.today(), settled=True, counterparty="项目人员",
+                recipient_user_id=si.id, created_by_user_id=seed["users"]["admin"]))
+        _db.session.commit()
+
+        login(client, "si")
+        # 北京 10-09：A（22:00）和 B（次日凌晨 02:00）都算 10-09，C 不算
+        html = client.get("/earnings?start=2026-10-09&end=2026-10-09").get_data(as_text=True)
+        assert "ProjTzA" in html
+        assert "ProjTzB" in html      # 关键：只按 UTC 日期算的话这里会漏掉
+        assert "ProjTzC" not in html
+
+        # 北京 10-08：只有 C
+        html2 = client.get("/earnings?start=2026-10-08&end=2026-10-08").get_data(as_text=True)
+        assert "ProjTzC" in html2
+        assert "ProjTzA" not in html2 and "ProjTzB" not in html2

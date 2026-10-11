@@ -96,7 +96,9 @@ from .upload_paths import (
     transaction_attachment_relpath,
 )
 from .pending import pending_items_for_user
+from .dividends import dividend_metrics
 from .log_rules import (
+    TZ_OFFSET,
     WEEKDAY_LABELS,
     pending_log_tasks_for_user,
     rules_for_project,
@@ -220,69 +222,6 @@ def _apply_project_status(p: Project, new_status: str) -> None:
     else:
         p.ended_at = None
     p.status = status
-
-
-def _dividend_remaining_cents(project: Project) -> int:
-    """计算项目的剩余可分红额度。"""
-    pid = int(project.id)
-    # 已结算收入
-    received_cents = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-        .filter(
-            Transaction.project_id == pid,
-            Transaction.type == TransactionType.INCOME.value,
-            Transaction.settled.is_(True),
-            Transaction.is_void.is_(False),
-            Transaction.status == "active",
-        )
-        .scalar()
-        or 0
-    )
-    # 已结算支出总额
-    paid_cents_all = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-        .filter(
-            Transaction.project_id == pid,
-            Transaction.type == TransactionType.EXPENSE.value,
-            Transaction.settled.is_(True),
-            Transaction.is_void.is_(False),
-            Transaction.status == "active",
-        )
-        .scalar()
-        or 0
-    )
-    # 分红支出
-    dividend_expense_cents = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-        .filter(
-            Transaction.project_id == pid,
-            Transaction.type == TransactionType.EXPENSE.value,
-            Transaction.settled.is_(True),
-            Transaction.is_void.is_(False),
-            Transaction.status == "active",
-            db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"),
-        )
-        .scalar()
-        or 0
-    )
-    paid_cents_excl_dividend = max(int(paid_cents_all) - dividend_expense_cents, 0)
-    expected_total_cents = project_expected_total_cents(pid)
-    finance = build_project_finance(
-        project,
-        expected_total_cents=expected_total_cents,
-        received_settled_income_bank_cents=int(received_cents),
-    )
-    received_net_cents = finance["received_net_cents"]
-    dividend_base_cents = max(int(received_net_cents) - paid_cents_excl_dividend, 0)
-    dividend_paid_total_cents = int(
-        db.session.query(
-            db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0)
-        )
-        .filter(ProjectDividendDistribution.project_id == pid)
-        .scalar()
-        or 0
-    )
-    return max(dividend_base_cents - max(dividend_paid_total_cents, dividend_expense_cents), 0)
 
 
 def project_expected_total_cents(project_id: int) -> int:
@@ -898,6 +837,26 @@ def dashboard():
     expense_cents = expense_q.scalar()
 
     projects = _accessible_projects_query().order_by(Project.id.desc()).all()
+    # 各项目「实际已付中介费」（一次查完，避免逐个项目查库）
+    broker_paid_by_project = {
+        int(pid): int(total or 0)
+        for pid, total in (
+            db.session.query(
+                Transaction.project_id,
+                db.func.coalesce(db.func.sum(Transaction.amount_cents), 0),
+            )
+            .filter(
+                Transaction.type == TransactionType.EXPENSE.value,
+                Transaction.counterparty == CP_EXPENSE_BROKER,
+                Transaction.settled.is_(True),
+                Transaction.is_void.is_(False),
+                Transaction.status == "active",
+                Transaction.project_id.isnot(None),
+            )
+            .group_by(Transaction.project_id)
+            .all()
+        )
+    }
     active_rows = []
     ended_rows = []
     active_count = 0
@@ -924,43 +883,16 @@ def dashboard():
             p,
             expected_total_cents=expected_total_cents,
             received_settled_income_bank_cents=received_gross,
+            broker_paid_cents=broker_paid_by_project.get(int(p.id), 0),
         )
 
         # 已终止项目：计算分红数据
         div_paid = 0
         div_remaining = 0
         if p.status == "ended":
-            paid_cents_all = int(
-                db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-                .filter(
-                    Transaction.project_id == p.id,
-                    Transaction.type == TransactionType.EXPENSE.value,
-                    Transaction.settled.is_(True),
-                    Transaction.is_void.is_(False),
-                    Transaction.status == "active",
-                )
-                .scalar() or 0
-            )
-            div_expense = int(
-                db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-                .filter(
-                    Transaction.project_id == p.id,
-                    Transaction.type == TransactionType.EXPENSE.value,
-                    Transaction.settled.is_(True),
-                    Transaction.is_void.is_(False),
-                    Transaction.status == "active",
-                    db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"),
-                )
-                .scalar() or 0
-            )
-            paid_excl_div = max(paid_cents_all - div_expense, 0)
-            div_base = max(int(fin["received_net_cents"]) - paid_excl_div, 0)
-            div_paid = int(
-                db.session.query(db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0))
-                .filter(ProjectDividendDistribution.project_id == p.id)
-                .scalar() or 0
-            )
-            div_remaining = max(div_base - max(div_paid, div_expense), 0)
+            dm = dividend_metrics(p.id, received_net_cents=int(fin["received_net_cents"]))
+            div_paid = dm.paid_cents
+            div_remaining = dm.remaining_cents
 
         row = {
             "project": p,
@@ -970,6 +902,8 @@ def dashboard():
             "received_net_cents": fin["received_net_cents"],
             "remaining_gross_cents": fin["remaining_gross_cents"],
             "remaining_net_cents": fin["remaining_net_cents"],
+            "remaining_net_cash_cents": fin["remaining_net_cash_cents"],
+            "broker_unpaid_cents": fin["broker_unpaid_cents"],
             "finance": fin,
             "dividend_paid": div_paid,
             "dividend_remaining": div_remaining,
@@ -1006,7 +940,7 @@ def dashboard():
     # chart: 按「我方未收净额」排序（仅进行中项目）
     top_projects = sorted(
         active_rows,
-        key=lambda r: r["remaining_net_cents"], reverse=True
+        key=lambda r: r["remaining_net_cash_cents"], reverse=True
     )[:10]
 
     # 构建子项目映射：{parent_id: [child_row, ...]}
@@ -1019,6 +953,7 @@ def dashboard():
     chart_projects = {
         "labels": [r["project"].name for r in top_projects],
         "remaining": [int(r["remaining_net_cents"]) / 100 for r in top_projects],
+        "remaining_cash": [int(r["remaining_net_cash_cents"]) / 100 for r in top_projects],
         "received": [int(r["received_net_cents"]) / 100 for r in top_projects],
     }
 
@@ -2489,29 +2424,11 @@ def project_dividend_page(project_id: int):
                 Transaction.settled.is_(True), Transaction.is_void.is_(False), Transaction.status == "active")
         .scalar() or 0
     )
-    paid_cents_all = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-        .filter(Transaction.project_id == p.id, Transaction.type == TransactionType.EXPENSE.value,
-                Transaction.settled.is_(True), Transaction.is_void.is_(False), Transaction.status == "active")
-        .scalar() or 0
-    )
-    div_expense = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-        .filter(Transaction.project_id == p.id, Transaction.type == TransactionType.EXPENSE.value,
-                Transaction.settled.is_(True), Transaction.is_void.is_(False), Transaction.status == "active",
-                db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"))
-        .scalar() or 0
-    )
-    paid_excl_div = max(paid_cents_all - div_expense, 0)
     exp_total = project_expected_total_cents(p.id)
     fin = build_project_finance(p, expected_total_cents=exp_total, received_settled_income_bank_cents=received_cents)
     received_net = fin["received_net_cents"]
-    div_base = max(received_net - paid_excl_div, 0)
-    div_paid = int(
-        db.session.query(db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0))
-        .filter(ProjectDividendDistribution.project_id == p.id).scalar() or 0
-    )
-    div_remaining = max(div_base - max(div_paid, div_expense), 0)
+    # 分红口径统一走 dividends.dividend_metrics（唯一实现）
+    dm = dividend_metrics(p.id, received_net_cents=int(received_net))
 
     # 分红对象：排除 admin 的项目成员
     members = (
@@ -2529,10 +2446,10 @@ def project_dividend_page(project_id: int):
     form_data = {
         "project": p,
         "received_net_cents": received_net,
-        "paid_cents_excl_div": paid_excl_div,
-        "dividend_base_cents": div_base,
-        "dividend_paid_cents": div_paid,
-        "dividend_remaining_cents": div_remaining,
+        "paid_cents_excl_div": dm.paid_excl_dividend_cents,
+        "dividend_base_cents": dm.base_cents,
+        "dividend_paid_cents": dm.paid_cents,
+        "dividend_remaining_cents": dm.remaining_cents,
         "members": members,
         "form": form,
     }
@@ -2591,39 +2508,19 @@ def project_dividend_post(project_id: int):
                 Transaction.settled.is_(True), Transaction.is_void.is_(False), Transaction.status == "active")
         .scalar() or 0
     )
-    paid_cents_all = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-        .filter(Transaction.project_id == p.id, Transaction.type == TransactionType.EXPENSE.value,
-                Transaction.settled.is_(True), Transaction.is_void.is_(False), Transaction.status == "active")
-        .scalar() or 0
-    )
-    div_expense = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
-        .filter(Transaction.project_id == p.id, Transaction.type == TransactionType.EXPENSE.value,
-                Transaction.settled.is_(True), Transaction.is_void.is_(False), Transaction.status == "active",
-                db.func.coalesce(Transaction.note, "").like("[DIVIDEND]%"))
-        .scalar() or 0
-    )
-    paid_excl_div = max(paid_cents_all - div_expense, 0)
     fin = build_project_finance(p, expected_total_cents=project_expected_total_cents(p.id),
                                 received_settled_income_bank_cents=received_cents)
-    div_base = max(int(fin["received_net_cents"]) - paid_excl_div, 0)
-    div_paid = int(
-        db.session.query(db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0))
-        .filter(ProjectDividendDistribution.project_id == p.id).scalar() or 0
-    )
-    div_remaining = max(div_base - max(div_paid, div_expense), 0)
+    dm = dividend_metrics(p.id, received_net_cents=int(fin["received_net_cents"]))
+    div_base = dm.base_cents
+    div_remaining = dm.remaining_cents
 
     if total_amt > div_remaining:
         flash(f"分红总额超出剩余可分红额度（剩余 ¥{format_cents(div_remaining)}）", "danger")
         return redirect(url_for("main.project_dividend_page", project_id=p.id))
 
     # 二次校验：在事务中重新确认剩余可分红（防并发超分）
-    latest_div_paid = int(
-        db.session.query(db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0))
-        .filter(ProjectDividendDistribution.project_id == p.id).scalar() or 0
-    )
-    latest_div_remaining = max(div_base - max(latest_div_paid, div_expense), 0)
+    dm_latest = dividend_metrics(p.id, received_net_cents=int(fin["received_net_cents"]))
+    latest_div_remaining = dm_latest.remaining_cents
     if total_amt > latest_div_remaining:
         flash(f"分红额度已发生变化（剩余 ¥{format_cents(latest_div_remaining)}），请重新提交", "danger")
         return redirect(url_for("main.project_dividend_page", project_id=p.id))
@@ -3116,31 +3013,8 @@ def project_detail(project_id: int):
         or 0
     )
     paid_cents = int(paid_cents_all)
-    if is_parent:
-        expected_total_cents = sum(project_expected_total_cents(sid) for sid in all_ids)
-        finance = build_project_finance(p, expected_total_cents=expected_total_cents,
-                                        received_settled_income_bank_cents=int(received_cents))
-        balance_tmp = {}
-        for sid in all_ids:
-            balance_tmp.update(running_settled_cash_balance_by_transaction_id(sid))
-        balance_after_by_tx_id = balance_tmp
-    else:
-        expected_total_cents = int(project_expected_total_cents(p.id))
-        finance = build_project_finance(
-            p,
-            expected_total_cents=expected_total_cents,
-            received_settled_income_bank_cents=int(received_cents),
-        )
-        balance_after_by_tx_id = running_settled_cash_balance_by_transaction_id(p.id)
-    expected_net_cents = finance["expected_net_cents"]
-    received_net_cents = finance["received_net_cents"]
-    remaining_gross_cents = finance["remaining_gross_cents"]
-    remaining_net_cents = finance["remaining_net_cents"]
-    broker_fee_expected_total_cents = finance["broker_fee_expected_total_cents"]
-    broker_estimated_cents = finance["broker_estimated_on_received_cents"]
-
-    # 实际已支付的中介费（通过支出流水记录）
-    broker_actual_expense_cents = int(
+    # 实际已支付的中介费（支出流水，对方=中介费）：算「未收净额」要用它
+    broker_paid_cents = int(
         db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
         .filter(
             query_pid_filter,
@@ -3153,21 +3027,40 @@ def project_detail(project_id: int):
         .scalar()
         or 0
     )
-    # 已给中介费 = 实际已支付的中介费支出流水（无记录则为0，不拿估算值冒充）
-    broker_paid_cents = broker_actual_expense_cents
+    if is_parent:
+        expected_total_cents = sum(project_expected_total_cents(sid) for sid in all_ids)
+        finance = build_project_finance(p, expected_total_cents=expected_total_cents,
+                                        received_settled_income_bank_cents=int(received_cents),
+                                        broker_paid_cents=broker_paid_cents)
+        balance_tmp = {}
+        for sid in all_ids:
+            balance_tmp.update(running_settled_cash_balance_by_transaction_id(sid))
+        balance_after_by_tx_id = balance_tmp
+    else:
+        expected_total_cents = int(project_expected_total_cents(p.id))
+        finance = build_project_finance(
+            p,
+            expected_total_cents=expected_total_cents,
+            received_settled_income_bank_cents=int(received_cents),
+            broker_paid_cents=broker_paid_cents,
+        )
+        balance_after_by_tx_id = running_settled_cash_balance_by_transaction_id(p.id)
+    expected_net_cents = finance["expected_net_cents"]
+    received_net_cents = finance["received_net_cents"]
+    remaining_gross_cents = finance["remaining_gross_cents"]
+    remaining_net_cents = finance["remaining_net_cents"]
+    remaining_net_cash_cents = finance["remaining_net_cash_cents"]
+    broker_unpaid_cents = finance["broker_unpaid_cents"]
+    broker_fee_expected_total_cents = finance["broker_fee_expected_total_cents"]
+    broker_estimated_cents = finance["broker_estimated_on_received_cents"]
 
     profit_realized_cents = int(received_net_cents) - int(paid_cents)
     profit_if_fully_collected_cents = int(expected_net_cents) - int(paid_cents)
-    dividend_base_cents = max(int(received_net_cents) - max(int(paid_cents) - dividend_expense_cents, 0), 0)
-    dividend_paid_total_cents = int(
-        db.session.query(
-            db.func.coalesce(db.func.sum(ProjectDividendDistribution.amount_cents), 0)
-        )
-        .filter(ProjectDividendDistribution.project_id == p.id)
-        .scalar()
-        or 0
-    )
-    dividend_remaining_cents = max(dividend_base_cents - max(dividend_paid_total_cents, dividend_expense_cents), 0)
+    # 分红口径统一走 dividends.dividend_metrics（唯一实现）
+    dm = dividend_metrics(p.id, received_net_cents=int(received_net_cents))
+    dividend_base_cents = dm.base_cents
+    dividend_paid_total_cents = dm.paid_cents
+    dividend_remaining_cents = dm.remaining_cents
     dividend_rows = (
         ProjectDividendDistribution.query.filter_by(project_id=p.id)
         .order_by(ProjectDividendDistribution.created_at.desc())
@@ -3322,6 +3215,8 @@ def project_detail(project_id: int):
         received_net_cents=int(received_net_cents),
         remaining_gross_cents=int(remaining_gross_cents),
         remaining_net_cents=int(remaining_net_cents),
+        remaining_net_cash_cents=int(remaining_net_cash_cents),
+        broker_unpaid_cents=int(broker_unpaid_cents),
         broker_fee_expected_total_cents=int(broker_fee_expected_total_cents),
         broker_estimated_cents=int(broker_estimated_cents),
         broker_paid_cents=int(broker_paid_cents),
@@ -3503,10 +3398,15 @@ def personal_earnings():
     target_user_id = request.args.get("user_id", type=int)
 
     start_d, end_d = _earnings_range_from_request(request.args)
-    # ended_at 存的是 naive UTC，页面也按该值展示，这里用同一口径比较（区间左闭右开）
-    lo = datetime.combine(start_d, datetime.min.time()) if start_d else None
+    # 用户填的是「北京时间」的日期，而 ended_at 存的是 naive UTC，所以边界要回推 8 小时；
+    # 否则北京时间凌晨 0~8 点终止的项目会被算到前一天。
+    lo = (
+        datetime.combine(start_d, datetime.min.time()) - TZ_OFFSET
+        if start_d
+        else None
+    )
     hi = (
-        datetime.combine(end_d + timedelta(days=1), datetime.min.time())
+        datetime.combine(end_d + timedelta(days=1), datetime.min.time()) - TZ_OFFSET
         if end_d
         else None
     )

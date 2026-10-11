@@ -101,7 +101,7 @@
 
   <h2 class="h6" style="color: var(--brand-primary);"><i class="bi bi-activity me-2"></i>进行中项目</h2>
   <div class="text-muted small mb-2">
-    合同金额统一为客户合同总价；「中介先扣」项目的收入流水通常记我方净额（中介已扣），「我方另付」项目收入流水通常记客户全额。未收净额均为我方口径。
+ 合同金额统一为客户合同总价；「中介先扣」项目的收入流水通常记我方净额（中介已扣），「我方另付」项目收入流水通常记客户全额。<strong>未收净额＝剩余应收 − 还欠中介费</strong>（中介已付清时就等于剩余应收）。
   </div>
   <div class="table-responsive">
     <table class="table table-sm align-middle">
@@ -134,7 +134,7 @@
               <td class="text-end">¥ {{ row.expected_net_cents|money }}</td>
               <td class="text-end">¥ {{ row.received_cents|money }}</td>
               <td class="text-end">¥ {{ row.received_net_cents|money }}</td>
-              <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ row.remaining_net_cents|money }}</td>
+              <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ row.remaining_net_cash_cents|money }}</td>
               <td>
                 {% if row.project.sub_projects %}
                   <span class="small text-muted">含子项目</span>
@@ -165,7 +165,7 @@
                 <td class="text-end small">¥ {{ child.expected_net_cents|money }}</td>
                 <td class="text-end small">¥ {{ child.received_cents|money }}</td>
                 <td class="text-end small">¥ {{ child.received_net_cents|money }}</td>
-                <td class="text-end small fw-bold text-danger">¥ {{ child.remaining_net_cents|money }}</td>
+                <td class="text-end small fw-bold text-danger">¥ {{ child.remaining_net_cash_cents|money }}</td>
                 <td>
                   <div class="d-flex align-items-center gap-2">
                     <div class="progress flex-grow-1" style="height: 6px;">
@@ -316,8 +316,8 @@
     data: {
       labels: proj.labels,
       datasets: [{
-        label: '我方未收净额（元）',
-        data: proj.remaining,
+        label: '我方未收净额（元，剩余应收 − 还欠中介）',
+        data: proj.remaining_cash,
       }]
     },
     options: {

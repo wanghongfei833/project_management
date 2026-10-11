@@ -153,6 +153,14 @@
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">未收到费用</div>
               {# 未收到费用＝剩余「客户侧全额」：净额模式下不能拿含介绍费的应收去减净额收入 #}
               <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ remaining_gross_cents|money }}</div>
+              {% if broker_unpaid_cents > 0 %}
+                <div class="text-muted" style="font-size:.68rem;">其中还要付中介 ¥{{ broker_unpaid_cents|money }}</div>
+              {% endif %}
+            </div>
+            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">未收净额（我方）</div>
+              {# 我方口径：剩余应收 − 还欠中介费（中介已付清时就等于剩余客户侧全额） #}
+              <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ remaining_net_cash_cents|money }}</div>
             </div>
           </div>
           <hr style="border-top:2px dashed #dde1e5;" class="my-2">
