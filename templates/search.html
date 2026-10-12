@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}搜索 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h4 mb-0">搜索</h1>
+      <div class="text-muted small">
+        支持：备注、对方、项目人员、发起人、金额（如 <code>8000</code>）、流水编号、凭证文件名、项目名
+      </div>
+    </div>
+    <div>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.export_transactions_csv') }}">导出流水 CSV</a>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.export_projects_csv') }}">导出项目汇总 CSV</a>
+    </div>
+  </div>
+
+  <form class="mb-4" method="get" action="{{ url_for('main.search') }}">
+    <div class="input-group">
+      <input class="form-control" type="search" name="q" value="{{ q }}" autofocus
+             placeholder="输入关键字，例如：中介费 / 8000 / 微信图片 / 扑克牌">
+      <button class="btn btn-primary" type="submit">搜索</button>
+    </div>
+  </form>
+
+  {% if q %}
+    <div class="text-muted small mb-3">关键字「{{ q }}」共找到 {{ total }} 项</div>
+  {% endif %}
+
+  {% if projects %}
+    <h2 class="h6 text-muted mb-2">项目（{{ projects|length }}）</h2>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm align-middle">
+        <thead><tr><th>项目</th><th>状态</th><th class="text-end">操作</th></tr></thead>
+        <tbody>
+          {% for p in projects %}
+            <tr>
+              <td class="fw-semibold">{{ p.name }}</td>
+              <td>{% if p.status == 'ended' %}<span class="badge text-bg-secondary">已终止</span>{% else %}<span class="badge text-bg-success">进行中</span>{% endif %}</td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=p.id) }}">详情</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  {% if transactions %}
+    <h2 class="h6 text-muted mb-2">流水（{{ transactions|length }}）</h2>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>日期</th><th>项目</th><th>类型</th><th class="text-end">金额</th>
+            <th>对方</th><th>备注</th><th class="text-end">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in transactions %}
+            <tr class="{% if t.is_void %}table-secondary{% elif t.status == 'pending' %}table-warning{% endif %}">
+              <td class="small">{{ t.occur_date }}</td>
+              <td class="small">{{ t.project.name if t.project else '—' }}</td>
+              <td>
+                {% if t.type == 'income' %}<span class="text-success fw-bold">收入</span>{% else %}<span class="text-danger fw-bold">支出</span>{% endif %}
+                {% if not t.settled %}<span class="badge text-bg-warning">未到账</span>{% endif %}
+                {% if t.is_void %}<span class="badge text-bg-secondary">已作废</span>{% elif t.status == 'pending' %}<span class="badge text-bg-warning">待审核</span>{% endif %}
+              </td>
+              <td class="text-end fw-semibold">¥ {{ t.amount_cents|money }}</td>
+              <td class="small">{{ t.counterparty or '—' }}</td>
+              <td class="small text-truncate" style="max-width:280px;">{{ t.note or '' }}</td>
+              <td class="text-end">
+                {% if t.project_id %}
+                  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=t.project_id) }}">去项目</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  {% if attachment_transactions %}
+    <h2 class="h6 text-muted mb-2">凭证文件名命中（{{ attachment_transactions|length }}）</h2>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm align-middle">
+        <thead><tr><th>日期</th><th>项目</th><th class="text-end">金额</th><th>命中的凭证</th></tr></thead>
+        <tbody>
+          {% for t in attachment_transactions %}
+            {% set items = [] %}
+            {% for a in t.attachments %}
+              {% if q.lower() in a.filename.lower() %}
+                {% set _ = items.append({"name": a.filename, "url": url_for("main.uploads", filename=a.stored_path)}) %}
+              {% endif %}
+            {% endfor %}
+            <tr>
+              <td class="small">{{ t.occur_date }}</td>
+              <td class="small">{{ t.project.name if t.project else '—' }}</td>
+              <td class="text-end">¥ {{ t.amount_cents|money }}</td>
+              <td>
+                <a href="#" class="text-decoration-none d-inline-flex align-items-center gap-1"
+                   data-receipt-title="流水 #{{ t.id }} 的凭证" data-receipts='{{ items|tojson }}'>
+                  {% for a in t.attachments[:3] %}
+                    {% if a.filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.gif')) %}
+                      <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" alt=""
+                           style="height:26px;width:26px;object-fit:cover;border-radius:4px;border:1px solid #e8ecf0;">
+                    {% endif %}
+                  {% endfor %}
+                  <span>查看凭证 ({{ items|length }})</span>
+                </a>
+                <div class="small text-muted text-truncate" style="max-width:320px;" title="命中的文件名">
+                  {% for a in t.attachments %}
+                    {%- if q.lower() in a.filename.lower() %}{{ a.filename }}{% if not loop.last %}、{% endif %}{% endif -%}
+                  {% endfor %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  {% if q and total == 0 %}
+    <div class="alert alert-light border">没有找到匹配的内容。</div>
+  {% endif %}
+{% endblock %}

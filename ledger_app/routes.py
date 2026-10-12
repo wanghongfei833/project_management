@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 
 from flask import (
     Blueprint,
+    Response,
     abort,
     current_app,
     flash,
@@ -97,6 +98,7 @@ from .upload_paths import (
 )
 from .pending import pending_items_for_user
 from .dividends import dividend_metrics
+from .sms_delivery import sync_delivery_status
 from .log_rules import (
     TZ_OFFSET,
     WEEKDAY_LABELS,
@@ -749,6 +751,34 @@ def sms_run_now():
     return redirect(url_for("main.sms_list"))
 
 
+@bp.post("/admin/sms/sync-status")
+@login_required
+def sms_sync_status():
+    """同步最近 3 天的投递回执（区分「阿里云受理」与「用户真收到」）。"""
+    if not is_admin():
+        flash("无权限", "danger")
+        return redirect(url_for("main.dashboard"))
+
+    try:
+        res = sync_delivery_status(days=3)
+    except Exception as exc:  # pragma: no cover
+        current_app.logger.exception("同步短信投递状态失败")
+        flash(f"同步失败：{type(exc).__name__}: {exc}", "danger")
+        return redirect(url_for("main.sms_list"))
+
+    if not res["checked"]:
+        flash("最近 3 天没有需要同步的短信", "info")
+    else:
+        msg = (
+            f"已同步 {res['checked']} 组：投递成功 {res['delivered']} 条、"
+            f"投递失败 {res['failed']} 条、仍在等待回执 {res['pending']} 条"
+        )
+        flash(msg, "warning" if res["failed"] else "success")
+    for err in res.get("errors", [])[:3]:
+        flash(f"查询异常：{err}", "warning")
+    return redirect(url_for("main.sms_list"))
+
+
 @bp.post("/admin/sms/test")
 @login_required
 def sms_send_test():
@@ -780,6 +810,224 @@ def sms_send_test():
 @bp.get("/health")
 def health():
     return {"ok": True}
+
+
+@bp.get("/search")
+@login_required
+def search():
+    """全局搜索：流水（备注/对方/收款人/发起人/金额/编号）、凭证文件名、项目名。"""
+    q_text = (request.args.get("q") or "").strip()
+    txs: list = []
+    att_txs: list = []
+    projects: list = []
+    if q_text:
+        like = f"%{q_text}%"
+        try:
+            amount_cents = yuan_to_cents(
+                Decimal(q_text.replace(",", "").replace("¥", "").replace("元", "").strip())
+            )
+        except Exception:
+            amount_cents = None
+
+        conds = [
+            db.func.coalesce(Transaction.note, "").like(like),
+            db.func.coalesce(Transaction.counterparty, "").like(like),
+            Transaction.id == (int(q_text) if q_text.isdigit() else -1),
+        ]
+        if amount_cents and amount_cents > 0:
+            conds.append(Transaction.amount_cents == amount_cents)
+        member_ids = db.session.query(User.id).filter(User.username.like(like))
+        conds.append(Transaction.recipient_user_id.in_(member_ids))
+        conds.append(Transaction.created_by_user_id.in_(member_ids))
+
+        base = Transaction.query.options(
+            joinedload(Transaction.project), joinedload(Transaction.recipient_user)
+        ).filter(Transaction.project_id.isnot(None), db.or_(*conds))
+        base = _apply_transaction_project_access_filter(base)
+        txs = base.order_by(Transaction.occur_date.desc(), Transaction.id.desc()).limit(100).all()
+
+        att_ids = [
+            int(r[0])
+            for r in db.session.query(Attachment.transaction_id)
+            .filter(Attachment.filename.like(like))
+            .limit(200)
+            .all()
+        ]
+        if att_ids:
+            aq = Transaction.query.options(
+                joinedload(Transaction.project), joinedload(Transaction.attachments)
+            ).filter(Transaction.id.in_(att_ids))
+            aq = _apply_transaction_project_access_filter(aq)
+            att_txs = aq.order_by(Transaction.occur_date.desc(), Transaction.id.desc()).limit(50).all()
+
+        projects = (
+            _accessible_projects_query()
+            .filter(Project.name.like(like))
+            .order_by(Project.id.desc())
+            .limit(50)
+            .all()
+        )
+
+    return render_template(
+        "search.html",
+        q=q_text,
+        transactions=txs,
+        attachment_transactions=att_txs,
+        projects=projects,
+        total=len(txs) + len(att_txs) + len(projects),
+        is_admin=is_admin(),
+    )
+
+
+# ===== 导出 CSV（Excel 可直接打开）=====
+
+
+def _csv_response(header: list, rows: list, filename: str):
+    """带 BOM 的 UTF-8 CSV，避免 Excel 打开中文乱码。"""
+    import csv
+    import io
+
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    writer = csv.writer(buf)
+    writer.writerow(header)
+    writer.writerows(rows)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+def _export_date_range():
+    start_d = _parse_iso_date(request.args.get("start"))
+    end_d = _parse_iso_date(request.args.get("end"))
+    return start_d, end_d
+
+
+@bp.get("/export/transactions.csv")
+@login_required
+def export_transactions_csv():
+    """导出流水（含作废/待审，用「状态」列区分），权限与列表页一致。"""
+    q = Transaction.query.options(
+        joinedload(Transaction.project), joinedload(Transaction.created_by)
+    ).filter(Transaction.project_id.isnot(None))
+    q = _apply_transaction_project_access_filter(q)
+
+    project_id = request.args.get("project_id", type=int)
+    if project_id:
+        if not is_admin() and not _is_project_member(project_id, current_user.id):
+            flash("你不是该项目成员，无权导出该项目", "danger")
+            return redirect(url_for("main.transactions_list"))
+        q = q.filter(Transaction.project_id == project_id)
+    start_d, end_d = _export_date_range()
+    if start_d:
+        q = q.filter(Transaction.occur_date >= start_d)
+    if end_d:
+        q = q.filter(Transaction.occur_date <= end_d)
+
+    txs = q.order_by(Transaction.occur_date.asc(), Transaction.id.asc()).all()
+    rows = []
+    for t in txs:
+        if t.is_void:
+            status = "已作废"
+        elif t.status == "pending":
+            status = "待审核"
+        else:
+            status = "已生效"
+        rows.append(
+            [
+                str(t.occur_date),
+                (t.project.name if t.project else ""),
+                "收入" if t.type == TransactionType.INCOME.value else "支出",
+                "%.2f" % (int(t.amount_cents or 0) / 100),
+                "已到账" if t.settled else "未到账",
+                status,
+                t.counterparty or "",
+                (t.recipient_user.username if t.recipient_user else ""),
+                (t.created_by.username if t.created_by else ""),
+                t.note or "",
+                str(len(t.attachments)) if t.attachments else "0",
+            ]
+        )
+    header = [
+        "日期", "项目", "类型", "金额(元)", "到账", "状态",
+        "对方", "项目人员", "发起人", "备注", "凭证数",
+    ]
+    return _csv_response(header, rows, f"transactions-{date.today():%Y%m%d}.csv")
+
+
+@bp.get("/export/projects.csv")
+@login_required
+def export_projects_csv():
+    """导出项目财务汇总（口径与项目详情页/仪表盘一致）。"""
+    projects = _accessible_projects_query().order_by(Project.id.asc()).all()
+    broker_paid = {
+        int(pid): int(total or 0)
+        for pid, total in (
+            db.session.query(
+                Transaction.project_id,
+                db.func.coalesce(db.func.sum(Transaction.amount_cents), 0),
+            )
+            .filter(
+                Transaction.type == TransactionType.EXPENSE.value,
+                Transaction.counterparty == CP_EXPENSE_BROKER,
+                Transaction.settled.is_(True),
+                Transaction.is_void.is_(False),
+                Transaction.status == "active",
+                Transaction.project_id.isnot(None),
+            )
+            .group_by(Transaction.project_id)
+            .all()
+        )
+    }
+
+    rows = []
+    for p in projects:
+
+        def _sum(*filters) -> int:
+            return int(
+                db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+                .filter(*filters)
+                .scalar()
+                or 0
+            )
+
+        base = [Transaction.project_id == p.id, Transaction.is_void.is_(False), Transaction.status == "active"]
+        received = _sum(*base, Transaction.type == TransactionType.INCOME.value, Transaction.settled.is_(True))
+        expense = _sum(*base, Transaction.type == TransactionType.EXPENSE.value, Transaction.settled.is_(True))
+        expected_total = int(project_expected_total_cents(int(p.id)))
+        fin = build_project_finance(
+            p,
+            expected_total_cents=expected_total,
+            received_settled_income_bank_cents=received,
+            broker_paid_cents=broker_paid.get(int(p.id), 0),
+        )
+        dm = dividend_metrics(int(p.id), received_net_cents=fin["received_net_cents"])
+        rows.append(
+            [
+                p.name,
+                "已终止" if p.status == "ended" else "进行中",
+                "%.2f" % (expected_total / 100),
+                "%.2f" % (fin["broker_fee_expected_total_cents"] / 100),
+                "%.2f" % (fin["expected_net_cents"] / 100),
+                "%.2f" % (fin["received_bank_income_cents"] / 100),
+                "%.2f" % (broker_paid.get(int(p.id), 0) / 100),
+                "%.2f" % (fin["broker_unpaid_cents"] / 100),
+                "%.2f" % (fin["remaining_gross_cents"] / 100),
+                "%.2f" % (fin["remaining_net_cash_cents"] / 100),
+                "%.2f" % (expense / 100),
+                "%.2f" % ((received - expense - fin["broker_unpaid_cents"]) / 100),
+                "%.2f" % (dm.paid_cents / 100),
+                "%.2f" % (dm.remaining_cents / 100),
+            ]
+        )
+    header = [
+        "项目", "状态", "应收(含介绍费)", "介绍费", "我方净应收", "已收",
+        "已付中介费", "还欠中介费", "剩余应收", "未收净额(我方)",
+        "支出", "净利润", "已分红", "剩余可分红",
+    ]
+    return _csv_response(header, rows, f"projects-{date.today():%Y%m%d}.csv")
 
 
 @bp.route("/login", methods=["GET", "POST"])

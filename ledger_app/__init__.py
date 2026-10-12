@@ -95,6 +95,10 @@ def create_app():
             try:
                 cursor = dbapi_connection.cursor()
                 cursor.execute("PRAGMA foreign_keys=ON")
+                # WAL：读写不互相阻塞；busy_timeout 避免偶发 database is locked
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA busy_timeout=5000")
                 cursor.close()
             except Exception:
                 pass

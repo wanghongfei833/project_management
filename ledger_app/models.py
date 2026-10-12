@@ -59,6 +59,10 @@ class SmsNotification(db.Model):
     trigger = db.Column(db.String(16), nullable=False, default="auto", index=True)  # auto/manual/test
     # 这条短信对应的「业务日期」（如日志提醒的当天），用于按天去重；待办提醒为空
     alert_date = db.Column(db.Date, nullable=True, index=True)
+    # 运营商投递回执（阿里云 QuerySendDetails，事后同步）
+    delivery_status = db.Column(db.String(16), nullable=True, index=True)  # 成功/失败/等待回执
+    delivery_error = db.Column(db.String(64), nullable=True)
+    delivered_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
 
     user = db.relationship("User", foreign_keys=[user_id])

@@ -187,3 +187,79 @@ def send_sms(
     result["biz_id"] = str(payload.get("BizId") or "")
     result["ok"] = result["code"] == "OK"
     return result
+
+
+def _call_api(action: str, extra_params: dict, *, timeout: int = 10) -> dict:
+    """调用阿里云短信 OpenAPI（RPC 签名），返回解析后的 JSON（失败时带 __error）。"""
+    cfg = sms_config()
+    if not sms_configured(cfg):
+        return {"__error": "NOT_CONFIGURED", "__message": "短信未配置"}
+    params = {
+        "Action": action,
+        "Version": "2017-05-25",
+        "Format": "JSON",
+        "RegionId": cfg["region_id"],
+        "AccessKeyId": cfg["access_key_id"],
+        "SignatureMethod": "HMAC-SHA1",
+        "SignatureVersion": "1.0",
+        "SignatureNonce": uuid.uuid4().hex,
+        "Timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    params.update(extra_params)
+    params["Signature"] = _sign(params, cfg["access_key_secret"])
+    url = cfg["endpoint"].rstrip("/") + "/?" + urlencode(params)
+    try:
+        req = Request(url, method="GET", headers={"User-Agent": "pm-ledger/1.0"})
+        with urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except Exception as exc:
+        return {"__error": type(exc).__name__, "__message": str(exc)}
+
+
+def query_send_details(
+    phone: str, send_date: str, *, page_size: int = 50, page: int = 1, biz_id: str = ""
+) -> dict:
+    """查询某号码某天的短信**投递回执**（阿里云控制台「发送记录」的接口版）。
+
+    ``send_date`` 形如 ``20261011``。返回 ``{"ok", "code", "message", "records": [...]}``，
+    每条记录含 send_status（1 等待回执 / 2 发送失败 / 3 发送成功）、err_code、content、receive_date。
+    """
+    params = {
+        "PhoneNumber": normalize_phone(phone),
+        "SendDate": str(send_date),
+        "PageSize": int(page_size),
+        "CurrentPage": int(page),
+    }
+    if biz_id:
+        params["BizId"] = str(biz_id)
+    payload = _call_api("QuerySendDetails", params)
+    if "__error" in payload:
+        return {"ok": False, "code": payload["__error"], "message": payload.get("__message", ""), "records": []}
+
+    details = (payload.get("SmsSendDetailDTOs") or {}).get("SmsSendDetailDTO") or []
+    if isinstance(details, dict):  # 只有一条时阿里云返回 dict
+        details = [details]
+    records = []
+    for d in details:
+        status = int(d.get("SendStatus") or 0)
+        records.append(
+            {
+                "send_status": status,
+                # 统一用短标签：库里/页面上都按「成功 / 失败 / 等待回执」判断
+                "status_text": {1: "等待回执", 2: "失败", 3: "成功"}.get(status, f"未知({status})"),
+                "err_code": (d.get("ErrCode") or "").strip(),
+                "phone": d.get("PhoneNum"),
+                "content": d.get("Content"),
+                "send_date": d.get("SendDate"),
+                "receive_date": d.get("ReceiveDate"),
+                "template_code": d.get("TemplateCode"),
+                "out_id": d.get("OutId"),
+            }
+        )
+    return {
+        "ok": str(payload.get("Code") or "") == "OK",
+        "code": payload.get("Code") or "",
+        "message": payload.get("Message") or "",
+        "total": int(payload.get("TotalCount") or 0),
+        "records": records,
+    }

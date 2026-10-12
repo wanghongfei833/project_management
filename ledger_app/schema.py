@@ -766,6 +766,9 @@ def ensure_sqlite_schema():
                   error TEXT,
                   "trigger" VARCHAR(16) NOT NULL DEFAULT 'auto',
                   alert_date DATE,
+                  delivery_status VARCHAR(16),
+                  delivery_error VARCHAR(64),
+                  delivered_at DATETIME,
                   created_at DATETIME NOT NULL,
                   FOREIGN KEY(user_id) REFERENCES users(id)
                 )
@@ -789,6 +792,15 @@ def ensure_sqlite_schema():
         db.session.execute(
             text("ALTER TABLE sms_notifications ADD COLUMN alert_date DATE")
         )
+
+    # 投递回执字段
+    for col, ddl in (
+        ("delivery_status", "VARCHAR(16)"),
+        ("delivery_error", "VARCHAR(64)"),
+        ("delivered_at", "DATETIME"),
+    ):
+        if _table_exists("sms_notifications") and not _column_exists("sms_notifications", col):
+            db.session.execute(text(f"ALTER TABLE sms_notifications ADD COLUMN {col} {ddl}"))
 
     if not _table_exists("sms_notification_projects"):
         db.session.execute(

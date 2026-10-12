@@ -1,0 +1,19 @@
+# 健康检查：每 5 分钟探测一次 /health，连续失败就发短信告警
+[Unit]
+Description=PM Ledger health check with SMS alert
+After=network.target private-pm.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/project/PM
+
+Environment="URL_PREFIX=/PM"
+Environment="DATABASE_URL=sqlite:////root/project/PM/instance/ledger.db"
+Environment="UPLOAD_FOLDER=/root/project/PM/uploads"
+Environment="PATH=/root/miniconda3/envs/TIE/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+EnvironmentFile=-/root/project/PM/.env.sms
+
+ExecStart=/root/miniconda3/envs/TIE/bin/python /root/project/PM/scripts/health_check.py

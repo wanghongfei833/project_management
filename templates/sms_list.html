@@ -64,6 +64,11 @@
               <input type="hidden" name="next" value="{{ url_for('main.sms_list') }}">
               <button class="btn btn-sm btn-primary" type="submit">立即检查并发送</button>
             </form>
+            <form method="post" action="{{ url_for('main.sms_sync_status') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="next" value="{{ url_for('main.sms_list') }}">
+              <button class="btn btn-sm btn-outline-primary" type="submit" title="向阿里云查询真实投递结果">同步投递状态</button>
+            </form>
             <form method="post" action="{{ url_for('main.sms_run_now') }}"
                   onsubmit="return confirm('将忽略 6 小时冷却，给所有有待办的人各发一条短信，确定？');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -215,6 +220,7 @@
             <th>手机号</th>
             <th class="text-end">条数</th>
             <th>状态</th>
+            <th>投递</th>
             <th>触发</th>
             <th>涉及项目</th>
             <th>备注</th>
@@ -234,6 +240,18 @@
                   <span class="badge text-bg-danger">失败</span>
                 {% endif %}
               </td>
+              <td class="small">
+                {% if r.delivery_status == '成功' %}
+                  <span class="badge text-bg-success">已送达</span>
+                {% elif r.delivery_status == '失败' %}
+                  <span class="badge text-bg-danger" title="{{ r.delivery_error or '' }}">未送达</span>
+                  <div class="text-muted" style="font-size:.7rem;">{{ r.delivery_error or '' }}</div>
+                {% elif r.delivery_status %}
+                  <span class="badge text-bg-warning">{{ r.delivery_status }}</span>
+                {% else %}
+                  <span class="text-muted">未同步</span>
+                {% endif %}
+              </td>
               <td class="small text-muted">
                 {% if r.trigger == 'auto' %}自动
                 {% elif r.trigger == 'manual' %}手动
@@ -250,7 +268,7 @@
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="8" class="text-muted">暂无短信记录</td></tr>
+            <tr><td colspan="9" class="text-muted">暂无短信记录</td></tr>
           {% endfor %}
         </tbody>
       </table>

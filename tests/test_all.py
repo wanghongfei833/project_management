@@ -1776,3 +1776,112 @@ class TestFinanceModelImprovements:
         html2 = client.get("/earnings?start=2026-10-08&end=2026-10-08").get_data(as_text=True)
         assert "ProjTzC" in html2
         assert "ProjTzA" not in html2 and "ProjTzB" not in html2
+
+
+class TestSearchExportAndDelivery:
+    """全局搜索、CSV 导出、短信投递回执同步。"""
+
+    def _seed_tx(self, name="ProjSearch"):
+        seed = get_seed()
+        p = Project.query.filter_by(name=name).first()
+        if p is None:
+            p = Project(
+                name=name, expected_income_cents=0,
+                broker_fee_mode="percent", broker_fee_direction="we_pay_separate",
+                referral_ratio=Decimal("0"), status="open",
+                leader_user_id=seed["users"]["admin"],
+                planned_start_date=date(2026, 1, 1), planned_end_date=date(2026, 12, 31),
+            )
+            _db.session.add(p)
+            _db.session.flush()
+            _db.session.add(ProjectMember(project_id=p.id, user_id=seed["users"]["admin"]))
+            _db.session.commit()
+        tx = Transaction(
+            project_id=p.id, status="active", type="expense", amount_cents=8_880_000,
+            occur_date=date(2026, 5, 20), settled=True, counterparty="中介测试对方",
+            note="搜索用备注-中介费", created_by_user_id=seed["users"]["admin"],
+        )
+        _db.session.add(tx)
+        _db.session.flush()
+        _db.session.add(Attachment(
+            transaction_id=tx.id, filename="微信图片_searchme_001.jpg",
+            stored_path=f"projects/{p.id}/t{tx.id}_search.jpg", sha256="0" * 64,
+        ))
+        _db.session.commit()
+        return p, tx
+
+    def test_search_by_note_amount_attachment_and_project(self, client):
+        p, tx = self._seed_tx()
+        login(client, "admin", "admin123!")
+
+        html = client.get("/search?q=%E4%B8%AD%E4%BB%8B%E8%B4%B9").get_data(as_text=True)  # 中介费
+        assert "搜索用备注-中介费" in html
+
+        html = client.get("/search?q=88800").get_data(as_text=True)  # 金额（元）
+        assert "搜索用备注-中介费" in html
+
+        html = client.get("/search?q=searchme").get_data(as_text=True)  # 凭证文件名
+        assert "微信图片_searchme_001.jpg" in html
+
+        html = client.get("/search?q=ProjSearch").get_data(as_text=True)  # 项目名
+        assert "ProjSearch" in html
+
+    def test_csv_exports(self, client):
+        self._seed_tx("ProjCsvExport")
+        login(client, "admin", "admin123!")
+
+        rv = client.get("/export/transactions.csv")
+        assert rv.status_code == 200
+        assert "text/csv" in rv.headers["Content-Type"]
+        body = rv.get_data().decode("utf-8")
+        assert body.startswith("\ufeff")          # BOM，Excel 中文不乱码
+        assert "日期,项目,类型,金额(元)" in body
+        assert "搜索用备注-中介费" in body
+
+        rv2 = client.get("/export/projects.csv")
+        assert rv2.status_code == 200
+        body2 = rv2.get_data().decode("utf-8")
+        assert "未收净额(我方)" in body2 and "剩余可分红" in body2
+        assert "ProjCsvExport" in body2
+
+    def test_sms_delivery_sync_marks_failure(self, client, monkeypatch):
+        from ledger_app.sms_delivery import sync_delivery_status
+
+        seed = get_seed()
+        si = _db.session.get(User, seed["users"]["si"])
+        rec = SmsNotification(
+            user_id=si.id, phone="13800000002", pending_count=1, status="sent",
+            trigger="auto", created_at=_utcnow() - timedelta(hours=2),
+        )
+        _db.session.add(rec)
+        _db.session.commit()
+        local_ts = (rec.created_at + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+
+        def fake_query(phone, day, **kwargs):
+            return {
+                "ok": True, "total": 1,
+                "records": [{
+                    "send_status": 2, "status_text": "失败", "err_code": "PORT_NOT_REGISTERED",
+                    "phone": phone, "content": "x", "send_date": local_ts,
+                    "receive_date": local_ts, "template_code": "SMS_X", "out_id": "",
+                }],
+            }
+
+        monkeypatch.setattr("ledger_app.sms_delivery.query_send_details", fake_query)
+        res = sync_delivery_status(days=1)
+        _db.session.refresh(rec)
+        assert rec.delivery_status == "失败"
+        assert rec.delivery_error == "PORT_NOT_REGISTERED"
+        assert res["failed"] >= 1
+
+        # 页面能看到「投递」列
+        login(client, "admin", "admin123!")
+        html = client.get("/admin/sms").get_data(as_text=True)
+        assert "未送达" in html and "PORT_NOT_REGISTERED" in html
+
+    def test_sms_page_shows_delivery_column(self, client):
+        login(client, "admin", "admin123!")
+        rv = client.get("/admin/sms")
+        assert rv.status_code == 200
+        html = rv.get_data(as_text=True)
+        assert "同步投递状态" in html and ">投递<" in html

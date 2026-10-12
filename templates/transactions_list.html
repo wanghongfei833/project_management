@@ -3,7 +3,11 @@
 {% block content %}
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h4 mb-0">流水</h1>
-    <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new') }}">新增流水</a>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-secondary"
+         href="{{ url_for('main.export_transactions_csv', project_id=current_project_id or none) }}">导出 CSV</a>
+      <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new') }}">新增流水</a>
+    </div>
   </div>
 
   <form class="row g-2 align-items-end mb-3" method="get">
