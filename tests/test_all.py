@@ -1885,3 +1885,24 @@ class TestSearchExportAndDelivery:
         assert rv.status_code == 200
         html = rv.get_data(as_text=True)
         assert "同步投递状态" in html and ">投递<" in html
+
+
+class TestSchemaMigrations:
+    """迁移版本表：执行过的迁移会被记录，重复执行不会重复应用。"""
+
+    def test_migrations_recorded_and_idempotent(self, app):
+        from ledger_app.schema import MIGRATIONS, applied_migrations, ensure_sqlite_schema
+
+        # app fixture 建库时已经跑过一次 → 版本表里应有全部版本
+        done = applied_migrations()
+        assert set(done) == {v for v, _n, _f in MIGRATIONS}
+
+        # 再跑一次：没有新执行的迁移
+        assert ensure_sqlite_schema() == []
+
+        # 版本表结构符合预期
+        rows = _db.session.execute(
+            _db.text("PRAGMA table_info(schema_migrations)")
+        ).mappings().all()
+        cols = {r["name"] for r in rows}
+        assert {"version", "note", "applied_at"} <= cols

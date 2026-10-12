@@ -1,8 +1,59 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from typing import Callable
+
 from sqlalchemy import text
 
 from .extensions import db
+
+SCHEMA_VERSION_TABLE = "schema_migrations"
+
+
+def ensure_migrations_table() -> None:
+    """迁移版本表：记录每段迁移是否已执行（SQLite 没有内置的迁移机制，自己记）。"""
+    if not _table_exists(SCHEMA_VERSION_TABLE):
+        db.session.execute(
+            text(
+                f"""
+                CREATE TABLE {SCHEMA_VERSION_TABLE} (
+                  version VARCHAR(64) PRIMARY KEY,
+                  note VARCHAR(255),
+                  applied_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+
+
+def applied_migrations() -> dict[str, str]:
+    """已应用的迁移：{version: applied_at}。"""
+    ensure_migrations_table()
+    rows = (
+        db.session.execute(
+            text(
+                f"SELECT version, applied_at FROM {SCHEMA_VERSION_TABLE} "
+                "ORDER BY version ASC"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return {str(r["version"]): str(r["applied_at"]) for r in rows}
+
+
+def _record_migration(version: str, note: str) -> None:
+    db.session.execute(
+        text(
+            f"INSERT OR IGNORE INTO {SCHEMA_VERSION_TABLE} (version, note, applied_at) "
+            "VALUES (:v, :n, :t)"
+        ),
+        {
+            "v": version,
+            "n": note,
+            "t": datetime.now(timezone.utc).replace(tzinfo=None),
+        },
+    )
 
 
 def _table_exists(table_name: str) -> bool:
@@ -17,12 +68,15 @@ def _column_exists(table_name: str, column_name: str) -> bool:
     return any(r.get("name") == column_name for r in rows)
 
 
-def ensure_sqlite_schema():
+def _migration_0001_historical_catchup() -> None:
     """
-    Lightweight, automatic SQLite migrations.
+    历史兜底迁移（建表 / 补列汇总）。
 
     This keeps the project simple (no Alembic/Migrate) while preventing
     OperationalError when models add new columns/tables.
+
+    每一步都自带「存在就跳过」的判断，所以对已经跑过的库重复执行也安全——
+    第一次引入版本表时，老库会在这里全部命中「已存在」，然后被登记为已应用。
     """
     # Add projects.referral_ratio if missing
     if _table_exists("projects") and not _column_exists("projects", "referral_ratio"):
@@ -831,3 +885,24 @@ def ensure_sqlite_schema():
         )
 
     db.session.commit()
+
+
+# 迁移清单：(版本号, 说明, 执行函数)。新增迁移请往后追加，不要改历史条目。
+MIGRATIONS: list[tuple[str, str, Callable[[], None]]] = [
+    ("0001", "历史建表/补列汇总（v0 → 2026-10 的全部列与表）", _migration_0001_historical_catchup),
+]
+
+
+def ensure_sqlite_schema() -> list[str]:
+    """建表 + 补列 + 记录版本。返回本次新执行的迁移版本列表（幂等，可重复调用）。"""
+    ensure_migrations_table()
+    done = applied_migrations()
+    newly: list[str] = []
+    for version, note, fn in MIGRATIONS:
+        if version in done:
+            continue
+        fn()
+        _record_migration(version, note)
+        newly.append(version)
+    db.session.commit()
+    return newly

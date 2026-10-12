@@ -1,4 +1,58 @@
-# 规划：`routes.py` 拆分（下阶段执行）
+# `routes.py` 拆分：方案与执行结果
+
+> **状态：已于 2026-10-12 执行完成**（`routes.py` 4461 行 → 最大模块 851 行）。
+> 执行方式：用一个一次性脚本按函数名**机械搬运**，不改一行逻辑；
+> 拆分前后对比 **URL 地图 64 条完全一致**、60 个测试全绿、18 个页面冒烟通过。
+
+## 执行结果（实际结构）
+
+```
+ledger_app/
+├── blueprints/                 # 全部路由仍注册在名为 main 的蓝图里（url_for('main.xxx') 不变）
+│   ├── __init__.py             # bp = Blueprint("main", __name__) + import 各领域触发注册
+│   ├── _common.py  (128 行)    # 原 routes.py 的 import 块 + 服务层 + 常量（各模块 from ._common import *）
+│   ├── core.py     (154 行)    # 登录/登出/改密、待办页、健康检查、uploads、before/after_request
+│   ├── dashboard.py(329 行)    # 仪表盘、报表
+│   ├── users.py    (228 行)    # 用户 CRUD / 重置密码 / 删除
+│   ├── sms_admin.py(254 行)    # 短信页、立即发送、同步投递回执、测试短信
+│   ├── exports.py  (279 行)    # 全局搜索、CSV 导出、个人收入
+│   ├── projects.py (848 行)    # 项目 CRUD、详情页、日志规则、进展日志
+│   ├── transactions.py(700行)  # 流水 CRUD + 新增/修改/删除审批
+│   ├── lifecycle.py(851 行)    # 终止/复活/删除项目/结束日期变更/追加应收
+│   └── dividend_routes.py(165行) # 分红页与分红提交
+├── services/                   # 跨模块共享逻辑（原 routes.py 里的辅助函数）
+│   ├── access.py   (111 行)    # 权限与可见性
+│   ├── approvals.py(198 行)    # 审批判定（全部同意 / 可否执行）
+│   ├── projects.py (76 行)     # 应收合计、状态切换、操作日志
+│   ├── money.py    (95 行)     # 分/元换算、CSV 响应、日期区间解析
+│   └── attachments.py(165 行)  # 附件读写
+└── routes.py       (40 行)     # 兼容层：只 re-export bp 与少量旧引用（如测试用的 _dividend_cash_balance_cents）
+```
+
+**后续可选的进一步拆分**：`lifecycle.py`（851 行）可按「项目终止/复活」与「删除/追加应收」再拆两份；
+`projects.py`（848 行）里的 `project_detail()` 单函数就有 370 行，可单独成文件。不再拆分也不影响可维护性。
+
+## 新增迁移版本表（已实现）
+
+SQLite 没有内置迁移/回滚机制（也不必换 MySQL）。现在库里有一张：
+
+```sql
+CREATE TABLE schema_migrations (
+  version VARCHAR(64) PRIMARY KEY,
+  note VARCHAR(255),
+  applied_at DATETIME NOT NULL
+);
+```
+
+- 历史所有「建表/补列」逻辑被包成 **0001 历史兜底迁移**，每步自带「存在就跳过」判断；
+  老库第一次启动时会全部命中「已存在」，然后登记为已应用（不会改动任何数据）。
+- 以后加迁移：在 `ledger_app/schema.py` 的 `MIGRATIONS` 列表**追加**一条 `("0002", "说明", 函数)`，启动时自动只跑没记录过的。
+- 查看状态：`python scripts/schema_status.py`（打印已应用/未应用，并把未应用的补跑）。
+- 回滚：表里记了版本，出问题能定位是哪一段；真要 down 语句，在迁移函数旁边写一个对应函数手工执行即可。
+
+---
+
+## 以下是当初的方案（执行时基本按此进行）
 
 > 现状：`ledger_app/routes.py` 约 3900 行、80+ 个路由，财务/审批/提醒/用户全在一个文件里。
 > 改一处容易误伤别处（比如上次「未收到费用」的口径 bug，就是同一公式散落 4 处导致的）。
