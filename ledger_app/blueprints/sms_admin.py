@@ -150,6 +150,7 @@ def sms_list():
         project_rows=project_rows,
         recipient_rows=recipient_rows,
         status_info=sms_status(),
+        error_hints=ERROR_HINTS,
         users=User.query.order_by(User.username.asc()).all(),
         projects=Project.query.order_by(Project.name.asc()).all(),
         selected_user_id=user_id,

@@ -284,3 +284,23 @@ def query_send_details(
         "total": int(payload.get("TotalCount") or 0),
         "records": records,
     }
+
+
+# 常见错误码 → 人话解释（页面/脚本展示用）
+ERROR_HINTS = {
+    "PORT_NOT_REGISTERED": "该号段运营商通道未开通（例如移动还在报备中）",
+    "MOBILE_NOT_ON_SERVICE": "号码不在服务区 / 已停机",
+    "CONTENT_KEYWORD": "内容含被运营商拦截的关键词",
+    "isv.BUSINESS_LIMIT_CONTROL": "触发流控（同号码/同签名发送频率限制）",
+    "isv.SMS_SIGNATURE_ILLEGAL": "签名名称与阿里云控制台不一致或未审核",
+    "isv.SMS_TEMPLATE_ILLEGAL": "模板 CODE 与参数不匹配或未审核",
+    "isv.AMOUNT_NOT_ENOUGH": "阿里云短信余额不足",
+    "NOT_CONFIGURED": "本系统未配置短信密钥",
+    "INVALID_PHONE": "手机号格式不对",
+    "REQUEST_FAILED": "调用阿里云接口失败（网络/超时）",
+}
+
+
+def error_hint(code: str | None) -> str:
+    """把错误码翻译成一句人话（没收录的返回空串）。"""
+    return ERROR_HINTS.get((code or "").strip(), "")

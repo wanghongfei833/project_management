@@ -1878,6 +1878,8 @@ class TestSearchExportAndDelivery:
         login(client, "admin", "admin123!")
         html = client.get("/admin/sms").get_data(as_text=True)
         assert "未送达" in html and "PORT_NOT_REGISTERED" in html
+        # 错误码旁边要有人话解释（移动通道未开通）
+        assert "该号段运营商通道未开通" in html
 
     def test_sms_page_shows_delivery_column(self, client):
         login(client, "admin", "admin123!")

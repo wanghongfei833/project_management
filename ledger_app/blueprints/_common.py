@@ -107,7 +107,7 @@ from ..log_rules import (
     weekdays_label,
     weekdays_to_csv,
 )
-from ..sms import is_valid_phone, normalize_phone
+from ..sms import ERROR_HINTS, error_hint, is_valid_phone, normalize_phone
 from ..sms_alerts import send_pending_alerts, send_test_sms, sms_status
 from ..utils import safe_join_upload, sha256_file
 

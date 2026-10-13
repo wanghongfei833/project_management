@@ -246,6 +246,8 @@
                 {% elif r.delivery_status == '失败' %}
                   <span class="badge text-bg-danger" title="{{ r.delivery_error or '' }}">未送达</span>
                   <div class="text-muted" style="font-size:.7rem;">{{ r.delivery_error or '' }}</div>
+                  {% set hint = error_hints.get(r.delivery_error, '') %}
+                  {% if hint %}<div class="text-muted" style="font-size:.7rem;">{{ hint }}</div>{% endif %}
                 {% elif r.delivery_status %}
                   <span class="badge text-bg-warning">{{ r.delivery_status }}</span>
                 {% else %}
