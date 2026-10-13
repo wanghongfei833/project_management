@@ -217,7 +217,11 @@ def send_pending_alerts(
         return summary
 
     for plan in plans:
-        result = send_sms(plan.phone, plan.pending_count)
+        # n2 = 最久那条待办已积压的小时数（至少 1 小时）
+        hours = 1
+        if plan.oldest_at is not None:
+            hours = max(int((_utcnow() - plan.oldest_at).total_seconds() // 3600), 1)
+        result = send_sms(plan.phone, plan.pending_count, hours=hours)
         record_sms(
             user_id=plan.user_id,
             phone=plan.phone,
@@ -243,10 +247,12 @@ def send_pending_alerts(
     return summary
 
 
-def send_test_sms(phone: str, number: int = 1, *, actor: User | None = None) -> dict:
+def send_test_sms(
+    phone: str, number: int = 1, *, hours: int = 1, actor: User | None = None
+) -> dict:
     """给指定号码发一条测试短信，并记一条 trigger=test 的记录。"""
     target = normalize_phone(phone)
-    result = send_sms(target, number)
+    result = send_sms(target, number, hours=hours)
     if result.get("configured"):
         record_sms(
             user_id=None,

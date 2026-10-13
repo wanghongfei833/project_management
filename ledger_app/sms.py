@@ -5,7 +5,9 @@
 - ``ALIYUN_SMS_ACCESS_KEY_ID``     访问密钥 ID（必填）
 - ``ALIYUN_SMS_ACCESS_KEY_SECRET`` 访问密钥 Secret（必填）
 - ``ALIYUN_SMS_SIGN_NAME``         短信签名名称（必填，例如「成都星瞳科技」）
-- ``ALIYUN_SMS_TEMPLATE_CODE``     模板 CODE，默认 ``SMS_512630691``
+- ``ALIYUN_SMS_TEMPLATE_CODE``     模板 CODE，默认 ``SMS_512571109``
+- ``ALIYUN_SMS_PARAM_COUNT``       条数变量名，默认 ``n1``
+- ``ALIYUN_SMS_PARAM_HOURS``       小时变量名，默认 ``n2``
 - ``ALIYUN_SMS_REGION``            区域，默认 ``cn-hangzhou``
 - ``ALIYUN_SMS_ENDPOINT``          接口地址，默认 ``https://dysmsapi.aliyuncs.com``
 
@@ -24,9 +26,14 @@ from datetime import datetime, timezone
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-DEFAULT_TEMPLATE_CODE = "SMS_512630691"
-# 阿里云短信模板文案（${number} 为待处理条数）
-SMS_TEMPLATE_TEXT = "项目账本还有{number}条内容未处理，请及时登录仪表盘 - 项目账本进行处理。"
+DEFAULT_TEMPLATE_CODE = "SMS_512571109"
+# 阿里云短信模板文案（${n1} = 未做条数，${n2} = 已过去小时数）
+# 注意：真正发出去的内容以阿里云后台登记的模板为准，这里只用于页面/记录展示。
+SMS_TEMPLATE_TEXT = "提醒您，星瞳账本还有{n1}条事项未做(已过去{n2}小时"
+
+# 模板变量名（阿里云会校验变量名与模板是否匹配，换模板时可用环境变量覆盖）
+DEFAULT_PARAM_COUNT = "n1"
+DEFAULT_PARAM_HOURS = "n2"
 
 _PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
 
@@ -66,8 +73,8 @@ def mask_phone(raw) -> str:
     return f"{p[:3]}****{p[-4:]}"
 
 
-def render_pending_text(number: int) -> str:
-    return SMS_TEMPLATE_TEXT.format(number=int(number))
+def render_pending_text(number: int, hours: int = 0) -> str:
+    return SMS_TEMPLATE_TEXT.format(n1=int(number), n2=int(hours))
 
 
 def sms_config() -> dict:
@@ -78,6 +85,10 @@ def sms_config() -> dict:
         "template_code": (os.environ.get("ALIYUN_SMS_TEMPLATE_CODE") or "").strip()
         or DEFAULT_TEMPLATE_CODE,
         "region_id": (os.environ.get("ALIYUN_SMS_REGION") or "").strip() or "cn-hangzhou",
+        "param_count": (os.environ.get("ALIYUN_SMS_PARAM_COUNT") or "").strip()
+        or DEFAULT_PARAM_COUNT,
+        "param_hours": (os.environ.get("ALIYUN_SMS_PARAM_HOURS") or "").strip()
+        or DEFAULT_PARAM_HOURS,
         "endpoint": (os.environ.get("ALIYUN_SMS_ENDPOINT") or "").strip()
         or "https://dysmsapi.aliyuncs.com",
     }
@@ -120,10 +131,13 @@ def send_sms(
     phone: str,
     number: int,
     *,
+    hours: int | None = None,
     template_code: str | None = None,
     timeout: int = 10,
 ) -> dict:
-    """发送一条「待办提醒」短信。返回 dict（不抛异常）。
+    """发送一条「待办/日志提醒」短信。返回 dict（不抛异常）。
+
+    ``number`` → 模板变量 n1（未做条数）；``hours`` → 模板变量 n2（已过去小时数）。
 
     返回::
 
@@ -132,7 +146,8 @@ def send_sms(
     """
     cfg = sms_config()
     target = normalize_phone(phone)
-    content = render_pending_text(number)
+    hours_value = int(hours) if hours is not None else 0
+    content = render_pending_text(number, hours_value)
     result = {
         "ok": False,
         "code": "",
@@ -167,7 +182,13 @@ def send_sms(
         "PhoneNumbers": target,
         "SignName": cfg["sign_name"],
         "TemplateCode": result["template_code"],
-        "TemplateParam": json.dumps({"number": str(int(number))}, ensure_ascii=False),
+        "TemplateParam": json.dumps(
+            {
+                cfg["param_count"]: str(int(number)),
+                cfg["param_hours"]: str(hours_value),
+            },
+            ensure_ascii=False,
+        ),
     }
     params["Signature"] = _sign(params, cfg["access_key_secret"])
 

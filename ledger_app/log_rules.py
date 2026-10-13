@@ -235,7 +235,9 @@ def send_log_reminders(
         return summary
 
     for plan in plans:
-        result = send_sms(plan.phone, plan.missing_count)
+        # 日志提醒：n2 = 当天已经过去的小时数（例如 20:00 发送 → 20）
+        hours = max(int(local_now().hour), 1)
+        result = send_sms(plan.phone, plan.missing_count, hours=hours)
         record_sms(
             user_id=plan.user_id,
             phone=plan.phone,

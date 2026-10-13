@@ -34,6 +34,7 @@ def main() -> int:
     parser.add_argument("--user-id", type=int, default=None, help="只检查指定用户")
     parser.add_argument("--test-phone", default=None, help="给该号码发一条测试短信")
     parser.add_argument("--test-number", type=int, default=1, help="测试短信里的条数")
+    parser.add_argument("--test-hours", type=int, default=1, help="测试短信里的「已过去小时数」")
     parser.add_argument(
         "--trigger",
         default="auto",
@@ -50,7 +51,9 @@ def main() -> int:
         from ledger_app.sms_alerts import send_pending_alerts, send_test_sms
 
         if args.test_phone:
-            result = send_test_sms(args.test_phone, args.test_number)
+            result = send_test_sms(
+                args.test_phone, args.test_number, hours=args.test_hours
+            )
             if result["ok"]:
                 print(f"[ok] 测试短信已发送至 {result['phone']}，BizId={result['biz_id']}")
                 return 0

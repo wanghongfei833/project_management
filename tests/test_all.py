@@ -739,7 +739,7 @@ class TestPhoneAndSms:
                 "biz_id": biz_id if ok else "",
                 "content": render_pending_text(number),
                 "configured": True,
-                "template_code": "SMS_512630691",
+                "template_code": "SMS_512571109",
                 "phone": phone,
             }
 
@@ -775,7 +775,7 @@ class TestPhoneAndSms:
         monkeypatch.setenv("ALIYUN_SMS_ACCESS_KEY_ID", "test-key-id")
         monkeypatch.setenv("ALIYUN_SMS_ACCESS_KEY_SECRET", "test-key-secret")
         monkeypatch.setenv("ALIYUN_SMS_SIGN_NAME", "测试签名")
-        monkeypatch.setenv("ALIYUN_SMS_TEMPLATE_CODE", "SMS_512630691")
+        monkeypatch.setenv("ALIYUN_SMS_TEMPLATE_CODE", "SMS_512571109")
 
     def _make_pending_item(self, project_id, requester_id, hours_old=7):
         tx = Transaction(
@@ -1055,7 +1055,7 @@ class TestLogRulesAndReminders:
                 "biz_id": "B-LOG" if ok else "",
                 "content": render_pending_text(number),
                 "configured": True,
-                "template_code": "SMS_512630691",
+                "template_code": "SMS_512571109",
                 "phone": phone,
             }
 

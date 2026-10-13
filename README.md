@@ -75,7 +75,7 @@
 - 手机号**可留空**：留空＝该用户不收任何短信（例如 admin、还没定号码的实习生），随时可在编辑页补录
 - 用户管理支持按「启用/禁用」「已填/未填手机号」筛选，也能按用户名或手机号搜索
 - 待办积压超过 **6 小时**后，给还没处理的人发短信，之后**每 6 小时再发一条**
-- 短信按人聚合，正文 `${number}` 为该人当前待处理条数（模板 `SMS_512630691`）
+- 短信按人聚合；模板 `SMS_512571109`（星瞳账本-代办事宜提醒）：`${n1}`=未做条数、`${n2}`=已过去小时数
 - 管理员「短信」页可溯源：按项目统计发了多少条、发给了谁、成功/失败明细
 - 服务器上由 `pm-sms-alert.timer` 每 30 分钟检查一次，配置见 [docs/sms-alerts.md](docs/sms-alerts.md)
 - **测试白名单**：环境变量 `ALIYUN_SMS_ALLOW_PHONES`（逗号分隔）非空时，自动提醒只发给这些号码，方便先拿一个人试；清空即全量放开
@@ -214,7 +214,8 @@ project_management/
 | `ALIYUN_SMS_ACCESS_KEY_ID` | 阿里云短信 AccessKeyId（未设置则不发短信） | 空 |
 | `ALIYUN_SMS_ACCESS_KEY_SECRET` | 阿里云短信 AccessKeySecret | 空 |
 | `ALIYUN_SMS_SIGN_NAME` | 短信签名名称（控制台已审核通过） | 空 |
-| `ALIYUN_SMS_TEMPLATE_CODE` | 短信模板 CODE | `SMS_512630691` |
+| `ALIYUN_SMS_TEMPLATE_CODE` | 短信模板 CODE | `SMS_512571109` |
+| `ALIYUN_SMS_PARAM_COUNT` / `ALIYUN_SMS_PARAM_HOURS` | 模板变量名（n1/n2） | `n1` / `n2` |
 | `ALIYUN_SMS_REGION` | 短信接口区域 | `cn-hangzhou` |
 
 ## 金额单位
