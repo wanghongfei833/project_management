@@ -5,7 +5,7 @@
     <div>
       <h1 class="h4 mb-0">短信提醒</h1>
       <div class="text-muted small">
-        待办超过 {{ status_info.alert_after_hours|int }} 小时未处理，每 {{ status_info.resend_every_hours|int }} 小时给待处理人发一条短信
+        有未处理的事项时，<strong>每晚 {{ status_info.alert_hour }}:00</strong> 给待处理人发一条短信（每天最多一条）
       </div>
     </div>
     <span class="badge {% if status_info.configured %}text-bg-success{% else %}text-bg-warning{% endif %} fs-6">
@@ -70,7 +70,7 @@
               <button class="btn btn-sm btn-outline-primary" type="submit" title="向阿里云查询真实投递结果">同步投递状态</button>
             </form>
             <form method="post" action="{{ url_for('main.sms_run_now') }}"
-                  onsubmit="return confirm('将忽略 6 小时冷却，给所有有待办的人各发一条短信，确定？');">
+                  onsubmit="return confirm('将忽略「今天已提醒」，给所有有待办的人各发一条短信，确定？');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="next" value="{{ url_for('main.sms_list') }}">
               <input type="hidden" name="force" value="1">

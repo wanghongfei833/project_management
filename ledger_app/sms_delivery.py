@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from .extensions import db
 from .models import SmsNotification
 from .sms import query_send_details
-from .log_rules import TZ_OFFSET
+from .timeutil import TZ_OFFSET
 
 
 def _parse_send_date(raw) -> datetime | None:

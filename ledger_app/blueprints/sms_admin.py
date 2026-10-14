@@ -165,7 +165,7 @@ def sms_list():
 @bp.post("/admin/sms/run")
 @login_required
 def sms_run_now():
-    """手动跑一轮待办检查（force=1 时忽略 6 小时冷却）。"""
+    """手动跑一轮待办检查（force=1 时忽略「今天已提醒过」的限制）。"""
     if not is_admin():
         flash("无权限", "danger")
         return redirect(url_for("main.dashboard"))
@@ -188,9 +188,8 @@ def sms_run_now():
     else:
         flash(
             "本轮没有需要发送的提醒："
-            f"待办未满 6 小时 {skipped['not_overdue']} 人、"
-            f"6 小时内已发过 {skipped['cooling']} 人、"
             f"当前无待办 {skipped['no_pending']} 人、"
+            f"今天已提醒过 {skipped['already_reminded']} 人、"
             f"未填手机号 {skipped['no_phone']} 人、"
             f"不在测试白名单 {skipped['not_allowed']} 人",
             "info",

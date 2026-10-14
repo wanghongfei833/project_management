@@ -1,9 +1,8 @@
 [Unit]
-Description=Run PM Ledger pending-approval SMS alert every 30 minutes
+Description=Run PM Ledger pending-approval SMS alert at 20:00 daily
 
 [Timer]
-OnBootSec=5min
-OnUnitActiveSec=30min
+OnCalendar=*-*-* 20:00:00
 AccuracySec=1min
 Persistent=true
 

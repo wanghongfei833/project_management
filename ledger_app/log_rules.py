@@ -24,10 +24,10 @@ from .sms import (
     sms_configured,
 )
 from .sms_alerts import record_sms
+from .timeutil import TZ_OFFSET, local_day_utc_bounds, local_now  # noqa: F401（对外沿用同名导出）
 
 WEEKDAY_LABELS = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}
 ALL_WEEKDAYS = {1, 2, 3, 4, 5, 6, 7}
-TZ_OFFSET = timedelta(hours=8)  # 北京时间
 
 
 def _url(endpoint: str, **values) -> str:
@@ -63,18 +63,7 @@ def weekdays_label(raw) -> str:
     return "每" + "、".join(WEEKDAY_LABELS[d] for d in sorted(days))
 
 
-# ===== 时间口径：库里存 naive UTC，业务按北京时间 =====
-
-
-def local_now() -> datetime:
-    """北京时间的当前时间（naive）。"""
-    return datetime.now(timezone.utc).replace(tzinfo=None) + TZ_OFFSET
-
-
-def local_day_utc_bounds(local_day: date) -> tuple[datetime, datetime]:
-    """把「北京时间的某一天」换算成库里 UTC 的 [起, 止) 区间。"""
-    start_utc = datetime.combine(local_day, time.min) - TZ_OFFSET
-    return start_utc, start_utc + timedelta(days=1)
+# 时间口径统一放在 timeutil（本模块 re-export，保持既有引用不变）
 
 
 def _weekday(d) -> int:

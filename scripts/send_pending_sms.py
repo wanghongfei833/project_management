@@ -78,8 +78,7 @@ def main() -> int:
         for plan in summary["plans"]:
             detail = "、".join(f"{name}({count})" for _pid, name, count in plan.projects)
             print(
-                f"  -> {plan.username} {plan.phone}：{plan.pending_count} 条待办"
-                f"（其中 {plan.overdue_count} 条已超 6 小时）{detail}"
+                f"  -> {plan.username} {plan.phone}：{plan.pending_count} 条待办 {detail}"
             )
         for msg in summary["messages"]:
             print(f"[info] {msg}")
@@ -88,7 +87,7 @@ def main() -> int:
         print(
             "[summary] 命中 {plans} 人，成功 {sent} 条，失败 {failed} 条；"
             "跳过：未填手机号 {no_phone}、号码不合法 {invalid_phone}、不在测试白名单 {not_allowed}、"
-            "无待办 {no_pending}、未满 6 小时 {not_overdue}、冷却中 {cooling}".format(
+            "无待办 {no_pending}、今天已提醒过 {already_reminded}".format(
                 plans=len(summary["plans"]), **skipped, **{
                     "sent": summary["sent"],
                     "failed": summary["failed"],

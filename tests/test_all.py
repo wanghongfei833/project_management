@@ -864,7 +864,7 @@ class TestPhoneAndSms:
         assert not hu.phone
 
     # ── 提醒判定 ──────────────────────────────────────────────
-    def test_alert_skips_without_phone_and_before_6h(self, client, monkeypatch):
+    def test_alert_skips_without_phone_and_needs_pending(self, client, monkeypatch):
         seed = get_seed()
         p = self._fresh_project("ProjSmsSkip", ["wang", "si"])
         wang = _db.session.get(User, seed["users"]["wang"])
@@ -878,7 +878,7 @@ class TestPhoneAndSms:
         assert plans == []
         assert skipped["no_phone"] == 1
 
-        # 补上号码，但申请只积压 2 小时 → 还不提醒
+        # 补上号码、且有未处理事项 → 就会命中（不再要求积压满 6 小时）
         si.phone = "13800000002"
         _db.session.commit()
         tx = (
@@ -890,10 +890,16 @@ class TestPhoneAndSms:
         req.created_at = _utcnow() - timedelta(hours=2)
         _db.session.commit()
         plans, skipped = build_alert_plans(user_id=si.id)
-        assert plans == []
-        assert skipped["not_overdue"] == 1
+        assert len(plans) == 1 and plans[0].pending_count >= 1
 
-    def test_send_alerts_records_and_cools_down(self, client, monkeypatch):
+        # 没有待办的人不提醒
+        si2 = _db.session.get(User, seed["users"]["zhuo"])
+        si2.phone = "13800000003"
+        _db.session.commit()
+        plans2, skipped2 = build_alert_plans(user_id=si2.id)
+        assert plans2 == [] and skipped2["no_pending"] == 1
+
+    def test_send_alerts_once_per_day(self, client, monkeypatch):
         self._enable_sms(monkeypatch)
         seed = get_seed()
         p = self._fresh_project("ProjSmsSend", ["wang", "si"])
@@ -909,7 +915,6 @@ class TestPhoneAndSms:
         # 只要 si 的人均待办数：应包含本项目的那 1 条
         plans, _ = build_alert_plans(user_id=si.id)
         assert len(plans) == 1
-        assert plans[0].overdue_count >= 1
         assert any(pid == p.id for pid, _name, _cnt in plans[0].projects)
         expected_count = plans[0].pending_count
 
@@ -930,10 +935,10 @@ class TestPhoneAndSms:
         # 项目拆分：能查到「某个项目给谁发过多少条」
         assert any(sp.project_id == p.id and sp.item_count >= 1 for sp in rec.projects)
 
-        # 6 小时冷却
+        # 同一天不重复发（按业务日期去重）
         res2 = send_pending_alerts(user_id=si.id)
-        assert res2["sent"] == 0 and res2["skipped"]["cooling"] == 1
-        # force 可以忽略冷却
+        assert res2["sent"] == 0 and res2["skipped"]["already_reminded"] == 1
+        # force 可以忽略「今天已提醒」
         res3 = send_pending_alerts(user_id=si.id, force=True)
         assert res3["sent"] == 1
 

@@ -1,9 +1,10 @@
-"""待办超时短信提醒。
+"""待办短信提醒。
 
-规则：某个申请在他人那里积压超过 6 小时，就给「还没同意的人」发短信；
-只要还没处理完，之后每 6 小时再发一条（靠发送记录做冷却，不会重复轰炸）。
+规则：**每晚 20:00 检查一次**——只要某人名下还有没处理的申请，就给他发一条短信；
+一天最多一条（按「业务日期」去重，手动发送也算当天已发）。
 
-短信按人聚合：一次给一个人发一条，正文里的 ``${number}`` 是该人当前待处理条数。
+短信按人聚合：一次给一个人发一条，正文里的 ``${n1}`` 是该人当前待处理条数、
+``${n2}`` 是最久那条已积压的小时数。
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from .extensions import db
 from .models import Role, SmsNotification, SmsNotificationProject, User
 from .pending import PendingItem, pending_items_for_user
+from .timeutil import TZ_OFFSET
 from .sms import (
     is_valid_phone,
     normalize_phone,
@@ -24,8 +26,8 @@ from .sms import (
     mask_phone,
 )
 
-ALERT_AFTER = timedelta(hours=6)
-RESEND_EVERY = timedelta(hours=6)
+# 每晚这个时间（北京时间）发一次；由 pm-sms-alert.timer 定时触发
+ALERT_HOUR = 20
 
 
 def _utcnow() -> datetime:
@@ -39,7 +41,6 @@ class AlertPlan:
     username: str
     phone: str
     pending_count: int
-    overdue_count: int
     oldest_at: datetime | None
     projects: list[tuple[int | None, str, int]] = field(default_factory=list)
 
@@ -56,18 +57,19 @@ def _project_breakdown(items: list[PendingItem]) -> list[tuple[int | None, str, 
     )
 
 
-def _last_sent_at(user_id: int) -> datetime | None:
-    row = (
-        db.session.query(SmsNotification.created_at)
+def _already_alerted(user_id: int, local_day: date) -> bool:
+    """当天是否已经提醒过（按业务日期判断，重跑不会重复发）。"""
+    return (
+        db.session.query(SmsNotification.id)
         .filter(
-            SmsNotification.user_id == user_id,
+            SmsNotification.user_id == int(user_id),
             SmsNotification.status == "sent",
             SmsNotification.trigger.in_(["auto", "manual"]),
+            SmsNotification.alert_date == local_day,
         )
-        .order_by(SmsNotification.created_at.desc(), SmsNotification.id.desc())
         .first()
+        is not None
     )
-    return row[0] if row else None
 
 
 def build_alert_plans(
@@ -76,16 +78,16 @@ def build_alert_plans(
     user_id: int | None = None,
     force: bool = False,
 ) -> tuple[list[AlertPlan], dict[str, int]]:
-    """挑出需要发短信的人。返回 (plans, 跳过原因统计)。"""
-    now = now or _utcnow()
+    """挑出需要发短信的人（有未处理事项、且当天还没提醒过）。"""
+    local_day = (now or _utcnow()) + TZ_OFFSET
+    local_day = local_day.date()
     plans: list[AlertPlan] = []
     skipped = {
         "no_phone": 0,
         "invalid_phone": 0,
         "not_allowed": 0,
         "no_pending": 0,
-        "not_overdue": 0,
-        "cooling": 0,
+        "already_reminded": 0,
     }
     allow = allowed_phones()
 
@@ -113,31 +115,17 @@ def build_alert_plans(
             skipped["no_pending"] += 1
             continue
 
-        overdue = [
-            i
-            for i in todo
-            if i.created_at is not None and (now - i.created_at) >= ALERT_AFTER
-        ]
-        if not overdue:
-            skipped["not_overdue"] += 1
+        if not force and _already_alerted(int(user.id), local_day):
+            skipped["already_reminded"] += 1
             continue
 
-        if not force:
-            last = _last_sent_at(int(user.id))
-            if last is not None and (now - last) < RESEND_EVERY:
-                skipped["cooling"] += 1
-                continue
-
-        oldest = min(
-            (i.created_at for i in overdue if i.created_at is not None), default=None
-        )
+        oldest = min((i.created_at for i in todo if i.created_at is not None), default=None)
         plans.append(
             AlertPlan(
                 user_id=int(user.id),
                 username=user.username,
                 phone=phone,
                 pending_count=len(todo),
-                overdue_count=len(overdue),
                 oldest_at=oldest,
                 projects=_project_breakdown(todo),
             )
@@ -222,6 +210,8 @@ def send_pending_alerts(
         if plan.oldest_at is not None:
             hours = max(int((_utcnow() - plan.oldest_at).total_seconds() // 3600), 1)
         result = send_sms(plan.phone, plan.pending_count, hours=hours)
+        # 记下「业务日期」，同一天不会重复发（自动/手动都算）
+        local_day = ((now or _utcnow()) + TZ_OFFSET).date()
         record_sms(
             user_id=plan.user_id,
             phone=plan.phone,
@@ -230,6 +220,7 @@ def send_pending_alerts(
             result=result,
             trigger=trigger,
             projects=plan.projects,
+            alert_date=local_day,
         )
         db.session.commit()
         if result.get("ok"):
@@ -278,8 +269,8 @@ def sms_status() -> dict:
         "region_id": cfg["region_id"],
         "has_access_key_id": bool(cfg["access_key_id"]),
         "has_access_key_secret": bool(cfg["access_key_secret"]),
-        "alert_after_hours": ALERT_AFTER.total_seconds() / 3600,
-        "resend_every_hours": RESEND_EVERY.total_seconds() / 3600,
+        "alert_hour": ALERT_HOUR,
+        "once_per_day": True,
         "test_mode": bool(allow),
         "allow_phones": [mask_phone(p) for p in sorted(allow)],
     }
