@@ -95,6 +95,18 @@ def main() -> int:
                 }
             )
         )
+        # 顺带同步最近两天的投递回执，这样「短信」页的「投递」列不用手动点也是最新的
+        if not args.dry_run:
+            try:
+                from ledger_app.sms_delivery import sync_delivery_status
+
+                res = sync_delivery_status(days=2)
+                print(
+                    "[info] 投递回执同步：更新 %d 条（送达 %d / 未送达 %d）"
+                    % (res["updated"], res["delivered"], res["failed"])
+                )
+            except Exception as exc:  # 同步失败不影响发送
+                print("[warn] 投递回执同步失败：%s: %s" % (type(exc).__name__, exc))
         return 1 if summary["failed"] else 0
 
 
