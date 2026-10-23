@@ -39,7 +39,7 @@
                   <input class="form-control form-control-sm" style="width:110px;" name="paid_amount_yuan"
                          value="{{ '%.2f'|format((tx.amount_cents or 0)/100) }}" title="实付金额（元）">
                   <select class="form-select form-select-sm"
-                          style="width:136px; min-width:136px;" name="payment_method">
+                          style="flex:0 0 176px; width:176px; min-width:176px;" name="payment_method">
                     {% for m in pay_methods %}<option>{{ m }}</option>{% endfor %}
                   </select>
                   <button class="btn btn-sm btn-success ms-auto text-nowrap flex-shrink-0" type="submit"
