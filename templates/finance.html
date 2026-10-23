@@ -38,7 +38,8 @@
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input class="form-control form-control-sm" style="width:110px;" name="paid_amount_yuan"
                          value="{{ '%.2f'|format((tx.amount_cents or 0)/100) }}" title="实付金额（元）">
-                  <select class="form-select form-select-sm" style="width:100px;" name="payment_method">
+                  <select class="form-select form-select-sm"
+                          style="width:136px; min-width:136px;" name="payment_method">
                     {% for m in pay_methods %}<option>{{ m }}</option>{% endfor %}
                   </select>
                   <button class="btn btn-sm btn-success" type="submit"
