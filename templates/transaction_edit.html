@@ -3,7 +3,7 @@
 {% block content %}
   <div class="d-flex justify-content-between align-items-start mb-3">
     <div>
-      <h1 class="h4 mb-1">修改流水（需项目全员同意）</h1>
+      <h1 class="h4 mb-1">修改流水（需项目负责人或管理员同意）</h1>
       <div class="text-muted small">
         项目：<span class="fw-semibold">{{ project.name }}</span>
         · 流水 ID：<span class="fw-semibold">{{ transaction.id }}</span>
@@ -13,7 +13,7 @@
   </div>
 
   <div class="alert alert-info">
-    提交后将创建"修改申请"。流水字段在<strong>「全体项目成员均已同意」或「至少一名管理员已点同意修改」</strong>后自动生效。
+    提交后将创建"修改申请"。流水字段在<strong>「项目负责人已同意」或「至少一名管理员已点同意修改」</strong>后自动生效。
     <strong>凭证</strong>：勾选下方「删除」并提交、或选择新文件上传，会在<strong>本次提交时立即生效</strong>（与字段审批流程无关）。
   </div>
 

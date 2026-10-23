@@ -125,6 +125,7 @@ def create_app():
 
         return {
             "is_admin": getattr(current_user, "role", None) == Role.ADMIN.value,
+            "can_finance": getattr(g, "can_finance", False),
             "pending_count": getattr(g, "pending_count", 0),
             "pending_items": getattr(g, "pending_items", []),
             "pending_waiting": getattr(g, "pending_waiting", []),

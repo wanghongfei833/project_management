@@ -14,7 +14,7 @@ from flask_login import current_user
 
 from ..extensions import db
 from ..models import Project, ProjectMember, Role, Transaction, TransactionType, User
-from .access import _accessible_projects_query, is_admin
+from .access import is_admin
 
 PAYMENT_PENDING = "pending"
 PAYMENT_APPROVED = "approved"
@@ -35,9 +35,55 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _is_admin_user(user: User | None) -> bool:
+    if user is None:
+        return is_admin()
+    return user.role == Role.ADMIN.value
+
+
+def can_finance_user(user: User | None) -> bool:
+    """该用户是否具备财务入口权限：管理员、财务角色或项目负责人。"""
+    if user is None:
+        if not getattr(current_user, "is_authenticated", False):
+            return False
+        user = current_user
+    if _is_admin_user(user) or bool(getattr(user, "is_finance", False)):
+        return True
+    return (
+        db.session.query(Project.id)
+        .filter(Project.leader_user_id == int(user.id))
+        .first()
+        is not None
+    )
+
+
 def can_pay() -> bool:
-    """财务权限：管理员默认拥有；普通用户可在用户管理里勾「财务」。"""
-    return is_admin() or bool(getattr(current_user, "is_finance", False))
+    """当前用户是否能进入财务工作区。"""
+    return can_finance_user(None)
+
+
+def can_pay_for_project(project_id: int | None, user: User | None = None) -> bool:
+    """能否对指定项目打款/驳回/确认到账。
+
+    管理员和显式财务角色拥有全局财务权限；普通项目负责人只负责自己项目。
+    """
+    if not project_id:
+        return False
+    if user is None:
+        if not getattr(current_user, "is_authenticated", False):
+            return False
+        user = current_user
+    if _is_admin_user(user) or bool(getattr(user, "is_finance", False)):
+        return True
+    return (
+        db.session.query(Project.id)
+        .filter(
+            Project.id == int(project_id),
+            Project.leader_user_id == int(user.id),
+        )
+        .first()
+        is not None
+    )
 
 
 @dataclass(frozen=True)
@@ -53,17 +99,25 @@ class PayTodo:
     url: str
 
 
-def _project_ids_scope(user: User | None = None):
-    """某用户可访问的项目 id 集合（管理员 None 表示不限）。"""
-    if user is not None and user.role == Role.ADMIN.value:
-        return None
-    if user is None and is_admin():
-        return None
-    user_id = int(user.id) if user is not None else int(current_user.id)
+def _member_project_ids(user: User) -> set[int]:
+    """用户作为项目成员可见的项目。"""
+    user_id = int(user.id)
     return {
         int(pid)
         for (pid,) in db.session.query(ProjectMember.project_id)
         .filter(ProjectMember.user_id == user_id)
+        .all()
+    }
+
+
+def finance_project_ids(user: User) -> set[int] | None:
+    """财务工作区范围；None 表示全部项目。"""
+    if _is_admin_user(user) or bool(getattr(user, "is_finance", False)):
+        return None
+    return {
+        int(pid)
+        for (pid,) in db.session.query(Project.id)
+        .filter(Project.leader_user_id == int(user.id))
         .all()
     }
 
@@ -154,7 +208,7 @@ def finance_todos(*, user_id: int, finance: bool = False) -> dict[str, list[PayT
     user = db.session.get(User, int(user_id))
     if user is None:
         return {"payments": [], "receipts": [], "income": []}
-    scope = _project_ids_scope(user)
+    scope = finance_project_ids(user) if finance else _member_project_ids(user)
 
     pay_rows = payable_expenses(scope=scope) if finance else []
     income_rows = income_awaiting_confirm(scope=scope) if finance else []

@@ -1,13 +1,10 @@
 """「待我处理」审批事项汇总。
 
-把全站需要成员同意的申请收敛到一处：新增/修改/删除流水、追加应收、
+把全站需要审批的申请收敛到一处：新增/修改/删除流水、追加应收、
 项目终止/复活/删除、计划结束日期变更。
 
-判定口径与各 approve 路由保持一致：
-- 非管理员：只有该项目（ProjectMember）里的成员才需要处理；
-- 管理员：任何申请都能处理（点「同意」即生效，拥有绝对权力）。
-申请人发起时会自动记一条同意记录，所以在自己发起的申请里不会出现在自己的待办，
-而是落在「我已同意，等待其他人」里。
+判定口径与各 approve 路由保持一致：**项目负责人或管理员任一同意即通过**。
+只有负责人、管理员以及申请人本人能看到对应申请；申请人发起时会自动记一条同意记录。
 """
 from __future__ import annotations
 
@@ -60,6 +57,7 @@ class PendingItem:
     project_name: str
     summary: str
     requester: str
+    requester_id: int | None
     created_at: datetime | None
     approve_url: str
     detail_url: str
@@ -93,24 +91,6 @@ def _member_project_ids(user_id: int) -> set[int]:
     return {int(r[0]) for r in rows}
 
 
-def _non_admin_member_counts(project_ids) -> dict[int, int]:
-    """{project_id: 非管理员成员数}，用于显示「已同意 x/y」。"""
-    ids = {int(p) for p in project_ids if p}
-    if not ids:
-        return {}
-    rows = (
-        db.session.query(ProjectMember.project_id, db.func.count(ProjectMember.user_id))
-        .join(User, User.id == ProjectMember.user_id)
-        .filter(
-            ProjectMember.project_id.in_(ids),
-            User.role != Role.ADMIN.value,
-        )
-        .group_by(ProjectMember.project_id)
-        .all()
-    )
-    return {int(pid): int(count) for pid, count in rows}
-
-
 def _approvals_by_request(model, key_name: str, key_values) -> dict[int, set[int]]:
     """{请求 id: {已同意的 user_id}}。"""
     values = [int(v) for v in key_values]
@@ -125,9 +105,36 @@ def _approvals_by_request(model, key_name: str, key_values) -> dict[int, set[int
 
 
 def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[PendingItem]:
-    """返回该用户可见的全部在途申请（含自己已同意、等待他人的）。"""
+    """返回该用户作为「审批人」或「发起人」可见的在途申请。
+
+    新审批规则：**管理员同意 或 项目负责人同意** 即通过。
+    所以只有负责人/管理员会作为审批人看到待办；其他成员只有在是发起人时
+    才会在「我已同意，等待负责人处理」里看到自己发起的申请。
+    """
     uid = int(user_id)
-    my_project_ids = None if is_admin_user else _member_project_ids(uid)
+    leaders = {
+        int(pid): (int(lid) if lid else None)
+        for pid, lid in db.session.query(Project.id, Project.leader_user_id).all()
+    }
+    admin_ids = {
+        int(uid_)
+        for (uid_,) in db.session.query(User.id)
+        .filter(User.role == Role.ADMIN.value)
+        .all()
+    }
+    leader_pids = {pid for pid, lid in leaders.items() if lid == uid}
+    my_project_ids = (
+        None if is_admin_user else (_member_project_ids(uid) | leader_pids)
+    )
+
+    def _required_count(pid) -> int:
+        return 1 if leaders.get(int(pid)) else 0
+
+    def _approved_count(pid, approved_ids) -> int:
+        leader = leaders.get(int(pid))
+        if not leader:
+            return 0
+        return 1 if (leader in approved_ids or (approved_ids & admin_ids)) else 0
 
     def in_scope(project_id) -> bool:
         if is_admin_user:
@@ -157,7 +164,6 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
             TransactionCreateApproval, "request_id", [r[1].id for r in rows]
         )
         names = _usernames({r[1].created_by_user_id for r in rows})
-        counts = _non_admin_member_counts({r[2].id for r in rows})
         for tx, req, project in rows:
             approved = approvals.get(int(req.id), set())
             items.append(
@@ -171,14 +177,15 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                         f"¥{format_cents(tx.amount_cents)}，{_fmt_date(tx.occur_date)}"
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
+                    requester_id=int(req.created_by_user_id or 0),
                     created_at=req.created_at,
                     approve_url=_url(
                         "main.transactions_create_approve", transaction_id=tx.id
                     ),
                     detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
-                    approved_count=len(approved),
-                    required_count=counts.get(int(project.id), 0),
+                    approved_count=_approved_count(int(project.id), approved),
+                    required_count=_required_count(int(project.id)),
                 )
             )
 
@@ -199,7 +206,6 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
             TransactionEditApproval, "request_id", [r[0].id for r in rows]
         )
         names = _usernames({r[0].created_by_user_id for r in rows})
-        counts = _non_admin_member_counts({r[2].id for r in rows})
         for req, tx, project in rows:
             approved = approvals.get(int(req.id), set())
             items.append(
@@ -215,14 +221,15 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                         f"{_fmt_date(req.new_occur_date)}"
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
+                    requester_id=int(req.created_by_user_id or 0),
                     created_at=req.created_at,
                     approve_url=_url(
                         "main.transactions_edit_approve", transaction_id=tx.id
                     ),
                     detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
-                    approved_count=len(approved),
-                    required_count=counts.get(int(project.id), 0),
+                    approved_count=_approved_count(int(project.id), approved),
+                    required_count=_required_count(int(project.id)),
                 )
             )
 
@@ -243,7 +250,6 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
             TransactionDeleteApproval, "request_id", [r[0].id for r in rows]
         )
         names = _usernames({r[0].created_by_user_id for r in rows})
-        counts = _non_admin_member_counts({r[2].id for r in rows})
         for req, tx, project in rows:
             approved = approvals.get(int(req.id), set())
             items.append(
@@ -257,14 +263,15 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                         f"¥{format_cents(tx.amount_cents)}，{_fmt_date(tx.occur_date)}"
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
+                    requester_id=int(req.created_by_user_id or 0),
                     created_at=req.created_at,
                     approve_url=_url(
                         "main.transactions_delete_approve", transaction_id=tx.id
                     ),
                     detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
-                    approved_count=len(approved),
-                    required_count=counts.get(int(project.id), 0),
+                    approved_count=_approved_count(int(project.id), approved),
+                    required_count=_required_count(int(project.id)),
                 )
             )
 
@@ -281,7 +288,6 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
             ProjectAdjustmentApproval, "adjustment_id", [r[0].id for r in rows]
         )
         names = _usernames({r[0].created_by_user_id for r in rows})
-        counts = _non_admin_member_counts({r[1].id for r in rows})
         for adj, project in rows:
             approved = approvals.get(int(adj.id), set())
             note = f"（{adj.note}）" if adj.note else ""
@@ -293,6 +299,7 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     project_name=project.name,
                     summary=f"追加 ¥{format_cents(adj.amount_cents)}{note}",
                     requester=names.get(int(adj.created_by_user_id or 0), "—"),
+                    requester_id=int(adj.created_by_user_id or 0),
                     created_at=adj.created_at,
                     approve_url=_url(
                         "main.project_adjust_approve",
@@ -301,8 +308,8 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     ),
                     detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
-                    approved_count=len(approved),
-                    required_count=counts.get(int(project.id), 0),
+                    approved_count=_approved_count(int(project.id), approved),
+                    required_count=_required_count(int(project.id)),
                 )
             )
 
@@ -319,7 +326,6 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
             ProjectEndApproval, "request_id", [r[0].id for r in rows]
         )
         names = _usernames({r[0].created_by_user_id for r in rows})
-        counts = _non_admin_member_counts({r[1].id for r in rows})
         for req, project in rows:
             approved = approvals.get(int(req.id), set())
             items.append(
@@ -330,14 +336,15 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     project_name=project.name,
                     summary="终止项目，通过后冻结为只读",
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
+                    requester_id=int(req.created_by_user_id or 0),
                     created_at=req.created_at,
                     approve_url=_url(
                         "main.project_end_approve", project_id=project.id
                     ),
                     detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
-                    approved_count=len(approved),
-                    required_count=counts.get(int(project.id), 0),
+                    approved_count=_approved_count(int(project.id), approved),
+                    required_count=_required_count(int(project.id)),
                 )
             )
 
@@ -354,7 +361,6 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
             ProjectReviveApproval, "request_id", [r[0].id for r in rows]
         )
         names = _usernames({r[0].created_by_user_id for r in rows})
-        counts = _non_admin_member_counts({r[1].id for r in rows})
         for req, project in rows:
             approved = approvals.get(int(req.id), set())
             items.append(
@@ -365,14 +371,15 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     project_name=project.name,
                     summary="复活项目，通过后恢复为进行中",
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
+                    requester_id=int(req.created_by_user_id or 0),
                     created_at=req.created_at,
                     approve_url=_url(
                         "main.project_revive_approve", project_id=project.id
                     ),
                     detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
-                    approved_count=len(approved),
-                    required_count=counts.get(int(project.id), 0),
+                    approved_count=_approved_count(int(project.id), approved),
+                    required_count=_required_count(int(project.id)),
                 )
             )
 
@@ -389,7 +396,6 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
             ProjectDeleteApproval, "request_id", [r[0].id for r in rows]
         )
         names = _usernames({r[0].created_by_user_id for r in rows})
-        counts = _non_admin_member_counts({r[1].id for r in rows})
         for req, project in rows:
             approved = approvals.get(int(req.id), set())
             items.append(
@@ -400,14 +406,15 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     project_name=project.name,
                     summary="删除项目及其全部流水与凭证（不可恢复）",
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
+                    requester_id=int(req.created_by_user_id or 0),
                     created_at=req.created_at,
                     approve_url=_url(
                         "main.projects_delete_approve", project_id=project.id
                     ),
                     detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
-                    approved_count=len(approved),
-                    required_count=counts.get(int(project.id), 0),
+                    approved_count=_approved_count(int(project.id), approved),
+                    required_count=_required_count(int(project.id)),
                 )
             )
 
@@ -424,7 +431,6 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
             ProjectEndDateChangeApproval, "request_id", [r[0].id for r in rows]
         )
         names = _usernames({r[0].created_by_user_id for r in rows})
-        counts = _non_admin_member_counts({r[1].id for r in rows})
         for req, project in rows:
             approved = approvals.get(int(req.id), set())
             items.append(
@@ -437,17 +443,24 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                         f"{_fmt_date(req.old_end_date)} → {_fmt_date(req.new_end_date)}"
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
+                    requester_id=int(req.created_by_user_id or 0),
                     created_at=req.created_at,
                     approve_url=_url(
                         "main.project_end_date_change_approve", project_id=project.id
                     ),
                     detail_url=_url("main.project_detail", project_id=project.id),
                     approved_by_me=uid in approved,
-                    approved_count=len(approved),
-                    required_count=counts.get(int(project.id), 0),
+                    approved_count=_approved_count(int(project.id), approved),
+                    required_count=_required_count(int(project.id)),
                 )
             )
 
+    # 只保留：我是审批人（负责人/管理员）的，或我是发起人的
+    items = [
+        it
+        for it in items
+        if is_admin_user or it.project_id in leader_pids or it.requester_id == uid
+    ]
     # 新的排前面
     items.sort(
         key=lambda i: (i.created_at is not None, i.created_at or datetime.min),

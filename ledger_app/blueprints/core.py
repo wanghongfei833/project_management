@@ -27,9 +27,10 @@ def _load_pending_approvals():
         g.log_todo_items = []
     g.log_todo_count = len(g.log_todo_items)
     # 付款闭环待办：待打款 / 待补回单 / 待确认到账
+    g.can_finance = can_pay()
     try:
         pay_todos = finance_todos(
-            user_id=int(current_user.id), finance=can_pay()
+            user_id=int(current_user.id), finance=g.can_finance
         )
     except Exception:  # pragma: no cover
         current_app.logger.exception("计算付款闭环待办失败")

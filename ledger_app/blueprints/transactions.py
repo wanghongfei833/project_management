@@ -45,12 +45,14 @@ def transactions_list():
         pids = sorted({int(t.project_id) for t in txs if t.project_id})
         if pids:
             rows = (
-                db.session.query(ProjectMember.project_id, db.func.count(ProjectMember.user_id))
-                .filter(ProjectMember.project_id.in_(pids))
-                .group_by(ProjectMember.project_id)
+                db.session.query(Project.id, Project.leader_user_id)
+                .filter(Project.id.in_(pids))
                 .all()
             )
-            member_count_by_project = {int(pid): int(c) for pid, c in rows}
+            # 新审批口径只需要负责人这一票；保留旧模板变量名避免扩大改动面。
+            member_count_by_project = {
+                int(pid): (1 if leader_id else 0) for pid, leader_id in rows
+            }
 
     return render_template(
         "transactions_list.html",
@@ -101,7 +103,12 @@ def transactions_new():
             form.type.data == TransactionType.EXPENSE.value
             and bool(form.use_payment_workflow.data)
         )
-        tx_status = "active" if is_admin() else "pending"
+        # 项目负责人本身就是审批人；其发起的申请视为已同意，可直接生效。
+        tx_status = (
+            "active"
+            if is_admin() or _is_project_leader(current_user.id, pid)
+            else "pending"
+        )
         if is_workflow_expense:
             tx_settled = False
             payment_status = PAYMENT_PENDING if tx_status == "pending" else PAYMENT_APPROVED
@@ -259,7 +266,7 @@ def transactions_edit(transaction_id: int):
             db.session.commit()
             flash(msg, "success")
         else:
-            msg = "已提交流水修改申请，待项目成员全部同意后生效。"
+            msg = "已提交流水修改申请，待项目负责人或管理员同意后生效。"
             if added:
                 msg += f" 已追加 {added} 个凭证。"
             if removed:
@@ -286,8 +293,8 @@ def transactions_edit_approve(transaction_id: int):
         flash("流水不存在", "warning")
         return redirect(url_for("main.transactions_list"))
 
-    if not is_admin() and not _is_project_member(int(tx.project_id), current_user.id):
-        flash("你不是该项目成员，无法同意修改", "danger")
+    if not is_admin() and not _is_project_leader(current_user.id, int(tx.project_id)):
+        flash("只有项目负责人或管理员可以同意修改", "danger")
         return redirect(url_for("main.projects_list"))
 
     req = _open_transaction_edit_request(tx.id)
@@ -334,7 +341,7 @@ def transactions_edit_approve(transaction_id: int):
         flash("修改申请已同意，条件满足已自动执行生效", "success")
     else:
         db.session.commit()
-        flash("已同意修改，等待其他成员同意后自动生效", "success")
+        flash("已同意修改，等待项目负责人或管理员处理", "success")
     return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
 
@@ -346,8 +353,8 @@ def transactions_edit_execute(transaction_id: int):
         flash("流水不存在", "warning")
         return redirect(url_for("main.transactions_list"))
 
-    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
-        flash("你不是该项目成员，无法执行修改", "danger")
+    if not (is_admin() or _is_project_leader(current_user.id, int(tx.project_id))):
+        flash("只有项目负责人或管理员可以执行修改", "danger")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     req = _open_transaction_edit_request(tx.id)
@@ -357,7 +364,7 @@ def transactions_edit_execute(transaction_id: int):
 
     if not _transaction_edit_can_execute(req):
         flash(
-            "须全体项目成员同意，或至少一名管理员点击「同意修改」后，才能执行修改。",
+            "须项目负责人或至少一名管理员同意后，才能执行修改。",
             "warning",
         )
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
@@ -482,8 +489,8 @@ def transactions_delete_approve(transaction_id: int):
         flash("流水不存在", "warning")
         return redirect(url_for("main.transactions_list"))
 
-    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
-        flash("你不是该项目成员，无法同意删除", "danger")
+    if not (is_admin() or _is_project_leader(current_user.id, int(tx.project_id))):
+        flash("只有项目负责人或管理员可以同意删除", "danger")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     req = _open_transaction_delete_request(tx.id)
@@ -523,7 +530,7 @@ def transactions_delete_approve(transaction_id: int):
         flash("删除申请已同意，条件满足已自动执行", "success")
     else:
         db.session.commit()
-        flash("已同意删除，等待其他成员同意后自动生效", "success")
+        flash("已同意删除，等待项目负责人或管理员处理", "success")
     return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
 
@@ -535,8 +542,8 @@ def transactions_delete_execute(transaction_id: int):
         flash("流水不存在", "warning")
         return redirect(url_for("main.transactions_list"))
 
-    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
-        flash("你不是该项目成员，无法执行删除", "danger")
+    if not (is_admin() or _is_project_leader(current_user.id, int(tx.project_id))):
+        flash("只有项目负责人或管理员可以执行删除", "danger")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     req = _open_transaction_delete_request(tx.id)
@@ -545,7 +552,7 @@ def transactions_delete_execute(transaction_id: int):
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     if not _transaction_delete_can_execute(req):
-        flash("未审核通过：需全体成员同意或管理员同意后，才能执行删除。", "warning")
+        flash("未审核通过：需项目负责人或管理员同意后，才能执行删除。", "warning")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     tx.is_void = True
@@ -603,8 +610,8 @@ def transactions_create_approve(transaction_id: int):
         flash("该流水不处于待审核状态", "warning")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
-    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
-        flash("你不是该项目成员，无法同意", "danger")
+    if not (is_admin() or _is_project_leader(current_user.id, int(tx.project_id))):
+        flash("只有项目负责人或管理员可以同意", "danger")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     req = _open_transaction_create_request(tx.id)
@@ -646,7 +653,7 @@ def transactions_create_approve(transaction_id: int):
         flash("新增申请已同意，条件满足已自动执行生效", "success")
     else:
         db.session.commit()
-        flash("已同意新增，等待其他成员同意后自动生效", "success")
+        flash("已同意新增，等待项目负责人或管理员处理", "success")
     return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
 
@@ -661,8 +668,8 @@ def transactions_create_execute(transaction_id: int):
         flash("该流水不处于待审核状态", "warning")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
-    if not (is_admin() or _is_project_member(int(tx.project_id), current_user.id)):
-        flash("你不是该项目成员，无法执行", "danger")
+    if not (is_admin() or _is_project_leader(current_user.id, int(tx.project_id))):
+        flash("只有项目负责人或管理员可以执行", "danger")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     req = _open_transaction_create_request(tx.id)
@@ -671,7 +678,7 @@ def transactions_create_execute(transaction_id: int):
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     if not _transaction_create_can_execute(req):
-        flash("未审核通过：需全体成员同意或管理员同意后，才能执行生效。", "warning")
+        flash("未审核通过：需项目负责人或管理员同意后，才能执行生效。", "warning")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     tx.status = "active"

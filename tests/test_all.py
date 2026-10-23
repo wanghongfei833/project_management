@@ -647,8 +647,8 @@ class TestPendingApprovals:
     def test_login_popup_and_todo_list(self, client):
         p = self._fresh_project("ProjTodo")
 
-        # A（wang）发起一笔流水申请
-        login(client, "wang")
+        # A（si，普通成员）发起一笔流水申请；B（wang）是项目负责人 = 审批人
+        login(client, "si")
         client.post("/transactions/new", data={
             "project_id": p.id, "type": "expense",
             "amount_yuan": "1234.56", "occur_date": date.today().isoformat(),
@@ -661,13 +661,13 @@ class TestPendingApprovals:
         )
         assert tx is not None
 
-        # 发起人自己不算待办（发起时自动记了一条同意）
+        # 发起人自己不算待办（发起时自动记了一条同意），但能在「等待负责人处理」里看到
         html = client.get("/approvals").data.decode("utf-8")
         assert "ProjTodo" in html
-        assert "我已同意，等待其他人" in html
+        assert "我已同意，等待负责人处理" in html
 
-        # B（si）登录：登录后第一次打开页面弹窗，第二次不再弹
-        rv = self._switch_user(client, "si")
+        # B（wang，负责人）登录：登录后第一次打开页面弹窗，第二次不再弹
+        rv = self._switch_user(client, "wang")
         first_html = rv.data.decode("utf-8")
         assert "pendingApprovalModal" in first_html
         assert "ProjTodo" in first_html
@@ -683,8 +683,8 @@ class TestPendingApprovals:
         html = client.get("/approvals").data.decode("utf-8")
         assert "ProjTodo" not in html
 
-        # B 在待办页一键同意 → 回到待办页，且申请自动生效
-        self._switch_user(client, "si")
+        # B（负责人）在待办页一键同意 → 回到待办页，且申请自动生效
+        self._switch_user(client, "wang")
         rv = client.post(
             f"/transactions/{tx.id}/create-approve",
             data={"next": "/approvals"},
@@ -701,18 +701,18 @@ class TestPendingApprovals:
     def test_project_end_request_notifies_other_member(self, client):
         p = self._fresh_project("ProjTodoEnd")
 
-        # A（wang）发起项目终止申请
-        login(client, "wang")
+        # A（si，普通成员）发起项目终止申请；B（wang，负责人）审批
+        login(client, "si")
         client.post(f"/projects/{p.id}/end-request")
         _db.session.refresh(p)
         assert p.status == "open"
 
-        # B（si）登录即可看到「项目终止」待办
-        html = self._switch_user(client, "si").data.decode("utf-8")
+        # B（wang，负责人）登录即可看到「项目终止」待办
+        html = self._switch_user(client, "wang").data.decode("utf-8")
         assert "项目终止" in html
         assert "ProjTodoEnd" in html
 
-        # B 同意后自动执行终止
+        # 负责人同意后自动执行终止
         client.post(
             f"/projects/{p.id}/end-approve",
             data={"next": "/approvals"},
@@ -758,7 +758,8 @@ class TestPhoneAndSms:
             referral_ratio=Decimal("0"),
             status="open",
             can_dividend=True,
-            leader_user_id=seed["users"][members[0]],
+            # 审批人取列表最后一位：短信用例里让 si 成为负责人、wang 作为申请人。
+            leader_user_id=seed["users"][members[-1]],
             planned_start_date=date(2026, 1, 1),
             planned_end_date=date(2026, 12, 31),
         )
@@ -1266,6 +1267,8 @@ class TestLogRulesAndReminders:
         p = self._project("ProjLogWhite", ["wang", "si"])
         si = _db.session.get(User, seed["users"]["si"])
         si.phone = "13800000002"
+        # 待办审批人为负责人；本用例让 si 成为负责人以验证短信白名单。
+        p.leader_user_id = si.id
         _db.session.add(
             ProjectLogRule(
                 project_id=p.id, user_id=si.id, weekdays="1",
@@ -1945,14 +1948,58 @@ class TestPaymentWorkflow:
             "use_payment_workflow": "y",
         }, follow_redirects=True)
 
+    def test_approval_is_leader_or_admin(self, client):
+        """普通成员不能审批；项目负责人或管理员任一同意即可。"""
+        seed = get_seed()
+        p = self._project("ProjLeaderRule")
+        zhuo_id = seed["users"]["zhuo"]
+        if not ProjectMember.query.filter_by(project_id=p.id, user_id=zhuo_id).first():
+            _db.session.add(ProjectMember(project_id=p.id, user_id=zhuo_id))
+            _db.session.commit()
+
+        login(client, "si")
+        self._new_expense(client, p.id, "120.00")
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, type="expense")
+            .order_by(Transaction.id.desc()).first()
+        )
+
+        # 普通成员（非负责人）点同意无效
+        client.post("/logout")
+        login(client, "zhuo")
+        client.post(f"/transactions/{tx.id}/create-approve", follow_redirects=True)
+        _db.session.refresh(tx)
+        assert tx.status == "pending"
+
+        # 管理员同意后直接生效
+        client.post("/logout")
+        login(client, "admin", "admin123!")
+        client.post(f"/transactions/{tx.id}/create-approve", follow_redirects=True)
+        _db.session.refresh(tx)
+        assert tx.status == "active"
+        assert tx.payment_status == "approved"
+
+    def test_leader_request_is_auto_approved(self, client):
+        """负责人发起时已具备同意权，不再生成无法处理的自我审批待办。"""
+        p = self._project("ProjLeaderCreate")
+        login(client, "wang")
+        self._new_expense(client, p.id, "88.00")
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, type="expense")
+            .order_by(Transaction.id.desc()).first()
+        )
+        assert tx.status == "active"
+        assert tx.payment_status == "approved"
+        assert TransactionCreateRequest.query.filter_by(transaction_id=tx.id).first() is None
+
     def test_full_closed_loop(self, client):
         import io
 
         seed = get_seed()
         p = self._project()
 
-        # 1) 王洪飞发起报销 → 待审批、未结算
-        login(client, "wang")
+        # 1) 胡文泰发起报销 → 待项目负责人审批、未结算
+        login(client, "si")
         self._new_expense(client, p.id, "1000.00")
         tx = (
             Transaction.query.filter_by(project_id=p.id, type="expense")
@@ -1963,18 +2010,27 @@ class TestPaymentWorkflow:
         assert tx.settled is False
         assert tx.payment_status == "pending"
 
-        # 2) 胡文泰同意 → 已批准待付款
+        # 2) 项目负责人王洪飞同意 → 已批准待付款
         client.post("/logout")
-        login(client, "si")
+        login(client, "wang")
         client.post(f"/transactions/{tx.id}/create-approve", follow_redirects=True)
         _db.session.refresh(tx)
         assert tx.status == "active"
         assert tx.payment_status == "approved"
         assert tx.settled is False
 
-        # 3) 财务（admin）打款 → 已付款待回单
+        # 其他项目负责人不能在别的项目打款
         client.post("/logout")
-        login(client, "admin", "admin123!")
+        login(client, "zhuo")
+        client.post(f"/finance/payments/{tx.id}/pay", data={
+            "paid_amount_yuan": "980.00", "payment_method": "银行转账",
+        }, follow_redirects=True)
+        _db.session.refresh(tx)
+        assert tx.payment_status == "approved" and tx.settled is False
+
+        # 3) 财务默认由项目负责人承担：王洪飞直接打款 → 已付款待回单
+        client.post("/logout")
+        login(client, "wang")
         rv = client.post(f"/finance/payments/{tx.id}/pay", data={
             "paid_amount_yuan": "980.00", "payment_method": "银行转账",
         }, follow_redirects=True)
@@ -1983,7 +2039,7 @@ class TestPaymentWorkflow:
         assert tx.settled is True
         assert tx.paid_amount_cents == 98_000
         assert tx.paid_at is not None
-        assert tx.paid_by_user_id == seed["users"]["admin"]
+        assert tx.paid_by_user_id == seed["users"]["wang"]
         assert tx.payment_status == "paid"
 
         # 4) 上传回单 → 闭环
@@ -2057,14 +2113,14 @@ class TestPaymentWorkflow:
         """待打款会进入财务待办，也会计入每晚短信的待办条数。"""
         seed = get_seed()
         p = self._project("ProjPayTodo")
-        login(client, "wang")
+        login(client, "si")
         self._new_expense(client, p.id, "700.00")
         tx = (
             Transaction.query.filter_by(project_id=p.id, type="expense")
             .order_by(Transaction.id.desc()).first()
         )
         client.post("/logout")
-        login(client, "si")
+        login(client, "wang")
         client.post(f"/transactions/{tx.id}/create-approve", follow_redirects=True)
         client.post("/logout")
         login(client, "admin", "admin123!")

@@ -20,10 +20,10 @@
       {% if project.status == 'ended' %}
         <span class="badge text-bg-danger">已终止</span>
       {% elif end_req %}
-        <span class="small text-muted">终止申请（{{ end_approved_ids|length }}/{{ members|length }}）</span>
+        <span class="small text-muted">终止申请（{{ end_approved_ids|length }}/{{ approval_required_count }}）</span>
         {% if current_user.id in end_approved_ids %}
           <span class="badge text-bg-secondary">已同意</span>
-        {% elif current_user.id in member_ids or is_admin %}
+        {% elif current_user.id == project.leader_user_id or is_admin %}
           <form method="post" action="{{ url_for('main.project_end_approve', project_id=project.id) }}" class="d-inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="submit">同意终止</button></form>
         {% endif %}
@@ -43,7 +43,7 @@
         {% set member_id_list = members|map(attribute='id')|list %}
         {% if current_user.id in approved_user_ids %}
           <span class="badge text-bg-secondary">已同意删除</span>
-        {% elif current_user.id in member_id_list or is_admin %}
+        {% elif current_user.id == project.leader_user_id or is_admin %}
           <form method="post" action="{{ url_for('main.projects_delete_approve', project_id=project.id) }}" onsubmit="return confirm('确认同意删除？');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" type="submit">同意删除</button></form>
         {% endif %}
@@ -70,8 +70,8 @@
             <span class="badge text-bg-warning">复活审批中</span>
             {% set revive_approved_ids = revive_req.approvals|map(attribute='user_id')|list %}
             {% set member_ids = members|map(attribute='id')|list %}
-            <span class="small ms-2">同意：{{ revive_approved_ids|length }} / {{ members|length }}</span>
-            {% if current_user.id not in revive_approved_ids and (current_user.id in member_ids or is_admin) %}
+            <span class="small ms-2">同意：{{ revive_approved_ids|length }} / {{ approval_required_count }}</span>
+            {% if current_user.id not in revive_approved_ids and (current_user.id == project.leader_user_id or is_admin) %}
               <form method="post" action="{{ url_for('main.project_revive_approve', project_id=project.id) }}" class="d-inline ms-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn-sm btn-outline-light btn-sm" type="submit">同意复活</button>
@@ -196,13 +196,13 @@
     <div class="modal-header"><div class="modal-title small fw-semibold">修改结束日期</div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body small">
       <div class="alert alert-warning py-2 mb-2">审批中：<strong>{{ end_change_req.old_end_date }}</strong> → <strong>{{ end_change_req.new_end_date }}</strong></div>
-      <div class="small text-muted mb-2">同意：{{ end_change_req.approvals|length }} / {{ members|length }}</div>
+      <div class="small text-muted mb-2">同意：{{ end_change_req.approvals|length }} / {{ approval_required_count }}</div>
       {% set ec_ap = end_change_req.approvals|map(attribute='user_id')|list %}
       {% if current_user.id in ec_ap %}<span class="badge text-bg-secondary">你已同意</span>
-      {% elif current_user.id in (members|map(attribute='id')|list) or is_admin %}
+      {% elif current_user.id == project.leader_user_id or is_admin %}
         <form method="post" action="{{ url_for('main.project_end_date_change_approve', project_id=project.id) }}" class="d-inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-primary" type="submit">同意</button></form>{% endif %}
-      {% if end_can_execute and (is_admin or current_user.id in (members|map(attribute='id')|list)) %}
+      {% if end_can_execute and (is_admin or current_user.id == project.leader_user_id) %}
         <form method="post" action="{{ url_for('main.project_end_date_change_execute', project_id=project.id) }}" class="d-inline ms-1">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-success" type="submit">执行</button></form>{% endif %}
       {% if is_admin or end_change_req.created_by_user_id == current_user.id %}
@@ -434,10 +434,10 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
             <td class="text-end">
               {% if a.status == 'pending' %}
                 {% set approved_ids = a.approvals|map(attribute='user_id')|list %}
-                <div class="small text-muted mb-1">同意：{{ approved_ids|length }} / {{ members|length }}</div>
+                <div class="small text-muted mb-1">同意：{{ approved_ids|length }} / {{ approval_required_count }}</div>
                 {% if current_user.id in approved_ids %}
                   <span class="badge text-bg-secondary">你已同意</span>
-                {% elif current_user.id in member_ids or is_admin %}
+                {% elif current_user.id == project.leader_user_id or is_admin %}
                   <form method="post" action="{{ url_for('main.project_adjust_approve', project_id=project.id, adjustment_id=a.id) }}" class="d-inline">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="btn btn-sm btn-outline-primary" type="submit">同意追加</button>
@@ -501,18 +501,18 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
               </td>
               <td class="text-end">
                 {% if creq %}
-                  <div class="small text-muted mb-1">同意：{{ creq.approvals|length }} / {{ members|length }}</div>
+                  <div class="small text-muted mb-1">同意：{{ creq.approvals|length }} / {{ approval_required_count }}</div>
                   {% set approved_ids = creq.approvals|map(attribute='user_id')|list %}
                   {% if current_user.id in approved_ids %}
                     <span class="badge text-bg-secondary">你已同意</span>
-                  {% elif current_user.id in member_ids or is_admin %}
+                  {% elif current_user.id == project.leader_user_id or is_admin %}
                     <form method="post" action="{{ url_for('main.transactions_create_approve', transaction_id=t.id) }}" class="d-inline">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                       <button class="btn btn-sm btn-outline-primary" type="submit">同意</button>
                     </form>
                   {% endif %}
 
-                  {% if (is_admin or current_user.id in member_ids) and create_can_execute_by_tx.get(t.id) %}
+                  {% if (is_admin or current_user.id == project.leader_user_id) and create_can_execute_by_tx.get(t.id) %}
                     <form method="post" action="{{ url_for('main.transactions_create_execute', transaction_id=t.id) }}" class="d-inline ms-1">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                       <button class="btn btn-sm btn-success" type="submit">执行生效</button>
@@ -598,11 +598,11 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
                 <div class="small">
                   <span class="badge text-bg-warning mb-1">审批中</span>
                   <div class="text-muted">修改待审批</div>
-                  <div class="text-muted">同意：{{ ereq.approvals|length }} / {{ members|length }}</div>
+                  <div class="text-muted">同意：{{ ereq.approvals|length }} / {{ approval_required_count }}</div>
                   {% set approved_ids = ereq.approvals|map(attribute='user_id')|list %}
                   {% if current_user.id in approved_ids %}
                     <span class="badge text-bg-secondary">你已同意</span>
-                  {% elif current_user.id in member_ids or is_admin %}
+                  {% elif current_user.id == project.leader_user_id or is_admin %}
                     <form method="post" action="{{ url_for('main.transactions_edit_approve', transaction_id=t.id) }}" class="d-inline">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                       <button class="btn btn-sm btn-outline-primary py-0" type="submit">同意</button>
@@ -620,11 +620,11 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
                 <div class="small">
                   <span class="badge text-bg-warning mb-1">审批中</span>
                   <div class="text-muted">删除待审批</div>
-                  <div class="text-muted">同意：{{ dreq.approvals|length }} / {{ members|length }}</div>
+                  <div class="text-muted">同意：{{ dreq.approvals|length }} / {{ approval_required_count }}</div>
                   {% set approved_ids = dreq.approvals|map(attribute='user_id')|list %}
                   {% if current_user.id in approved_ids %}
                     <span class="badge text-bg-secondary">你已同意</span>
-                  {% elif current_user.id in member_ids or is_admin %}
+                  {% elif current_user.id == project.leader_user_id or is_admin %}
                     <form method="post" action="{{ url_for('main.transactions_delete_approve', transaction_id=t.id) }}" class="d-inline">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                       <button class="btn btn-sm btn-outline-danger py-0" type="submit">同意删</button>

@@ -8,6 +8,8 @@ from ..services.payments import (
     PAYMENT_PENDING,
     PAYMENT_REJECTED,
     can_pay,
+    can_pay_for_project,
+    finance_project_ids,
     finance_todos,
     payment_status_label,
     utcnow,
@@ -36,13 +38,14 @@ def finance_page():
     todos = finance_todos(user_id=int(current_user.id), finance=finance)
     closed = []
     if finance:
-        scope_q = _accessible_projects_query().with_entities(Project.id)
-        scope = {int(pid) for (pid,) in scope_q.all()}
+        scope = finance_project_ids(current_user)
         closed_q = Transaction.query.filter(
             Transaction.payment_status == PAYMENT_CLOSED,
             Transaction.is_void.is_(False),
         )
-        if scope:
+        if scope is None:
+            pass
+        elif scope:
             closed_q = closed_q.filter(Transaction.project_id.in_(scope))
         else:
             closed_q = closed_q.filter(False)
@@ -63,14 +66,13 @@ def finance_page():
 @bp.post("/finance/payments/<int:transaction_id>/pay")
 @login_required
 def finance_pay(transaction_id: int):
-    if not can_pay():
-        flash("无财务权限", "danger")
-        return redirect(url_for("main.dashboard"))
-
     tx = _load_tx(transaction_id)
     if not tx or tx.is_void or tx.type != TransactionType.EXPENSE.value:
         flash("支出流水不存在", "warning")
         return redirect(url_for("main.finance_page"))
+    if not can_pay_for_project(tx.project_id):
+        flash("只有项目负责人、管理员或财务可以打款", "danger")
+        return redirect(url_for("main.dashboard"))
     if tx.settled or tx.payment_status not in (PAYMENT_APPROVED, PAYMENT_PENDING):
         flash("该笔不是「已批准待付款」状态，无法打款", "warning")
         return redirect(url_for("main.finance_page"))
@@ -119,7 +121,9 @@ def finance_upload_receipt(transaction_id: int):
     if not tx or tx.is_void:
         flash("流水不存在", "warning")
         return redirect(url_for("main.finance_page"))
-    allowed = can_pay() or int(tx.created_by_user_id or 0) == int(current_user.id)
+    allowed = can_pay_for_project(tx.project_id) or (
+        int(tx.created_by_user_id or 0) == int(current_user.id)
+    )
     if not allowed:
         flash("无权限上传该笔回单", "danger")
         return redirect(url_for("main.dashboard"))
@@ -146,10 +150,10 @@ def finance_upload_receipt(transaction_id: int):
 @bp.post("/finance/payments/<int:transaction_id>/reject")
 @login_required
 def finance_reject(transaction_id: int):
-    if not can_pay():
-        flash("无财务权限", "danger")
-        return redirect(url_for("main.dashboard"))
     tx = _load_tx(transaction_id)
+    if not tx or not can_pay_for_project(tx.project_id):
+        flash("只有项目负责人、管理员或财务可以驳回", "danger")
+        return redirect(url_for("main.dashboard"))
     if not tx or tx.is_void or tx.payment_status not in (PAYMENT_PENDING, PAYMENT_APPROVED):
         flash("该笔不在可驳回状态", "warning")
         return redirect(url_for("main.finance_page"))
@@ -175,13 +179,12 @@ def finance_reject(transaction_id: int):
 @bp.post("/finance/income/<int:transaction_id>/confirm")
 @login_required
 def finance_confirm_income(transaction_id: int):
-    if not can_pay():
-        flash("无财务权限", "danger")
-        return redirect(url_for("main.dashboard"))
     tx = _load_tx(transaction_id)
+    if not tx or not can_pay_for_project(tx.project_id):
+        flash("只有项目负责人、管理员或财务可以确认到账", "danger")
+        return redirect(url_for("main.dashboard"))
     if (
-        not tx
-        or tx.is_void
+        tx.is_void
         or tx.type != TransactionType.INCOME.value
         or tx.status != "active"
         or tx.settled

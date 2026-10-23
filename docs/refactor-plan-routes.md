@@ -110,7 +110,7 @@ ledger_app/
 
 - URL 与 endpoint 名（模板里到处在用 `url_for('main.xxx')`）：保留 `main` 这个 blueprint 名，或用 `app.add_url_rule` 兼容；
 - `pending.py` / `log_rules.py` / `sms_alerts.py` 里的函数签名（定时任务脚本依赖）；
-- 各审批路由的判定口径（非管理员成员全部同意 / 任一管理员同意）。
+- 各审批路由的判定口径（项目负责人同意 / 任一管理员同意）。
 
 > endpoint 名保持 `main.xxx` 最省事：所有 blueprint 都用 `Blueprint("main", ...)` 会重名，
 > 所以更稳的做法是**保留一个名为 `main` 的父 blueprint**，各领域用子 blueprint 注册进去，

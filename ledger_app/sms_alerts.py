@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from .extensions import db
 from .models import Role, SmsNotification, SmsNotificationProject, User
 from .pending import PendingItem, pending_items_for_user
-from .services.payments import finance_todos
+from .services.payments import can_finance_user, finance_todos
 from .timeutil import TZ_OFFSET
 from .sms import (
     is_valid_phone,
@@ -114,10 +114,8 @@ def build_alert_plans(
         todo = [i for i in items if not i.approved_by_me]
         # 付款闭环待办（待打款/待补回单/待确认到账）也算「未做事项」
         try:
-            pay = finance_todos(
-                user_id=int(user.id),
-                finance=(user.role == Role.ADMIN.value or bool(user.is_finance)),
-            )
+            finance_access = can_finance_user(user)
+            pay = finance_todos(user_id=int(user.id), finance=finance_access)
             pay_items = pay["payments"] + pay["receipts"] + pay["income"]
         except Exception:  # pragma: no cover
             pay_items = []

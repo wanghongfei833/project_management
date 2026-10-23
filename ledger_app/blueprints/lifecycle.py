@@ -64,7 +64,7 @@ def project_end_date_change(project_id: int):
             flash("结束日期变更申请已提交，条件满足已自动生效", "success")
         else:
             db.session.commit()
-            flash("已提交结束日期变更申请，待项目成员全部同意后生效", "success")
+            flash("已提交结束日期变更申请，待项目负责人或管理员同意后生效", "success")
         return redirect(url_for("main.project_detail", project_id=p.id))
 
     return redirect(url_for("main.project_detail", project_id=p.id))
@@ -78,7 +78,7 @@ def project_end_date_change_approve(project_id: int):
         flash("项目不存在", "warning")
         return redirect(url_for("main.projects_list"))
 
-    if not is_admin() and not _is_project_member(p.id, current_user.id):
+    if not is_admin() and not _is_project_leader(current_user.id, p.id):
         flash("你不是该项目成员，无法同意", "danger")
         return redirect(url_for("main.projects_list"))
 
@@ -117,7 +117,7 @@ def project_end_date_change_approve(project_id: int):
         flash("结束日期变更已同意，条件满足已自动执行生效", "success")
     else:
         db.session.commit()
-        flash("已同意结束日期变更，等待其他成员同意后自动生效", "success")
+        flash("已同意结束日期变更，等待项目负责人或管理员处理", "success")
     return redirect(url_for("main.project_detail", project_id=p.id))
 
 
@@ -136,7 +136,7 @@ def project_end_date_change_execute(project_id: int):
 
     if not _project_end_date_change_can_execute(req):
         flash(
-            "须全体项目成员同意，或至少一名管理员点击「同意变更」后，才能执行结束日期调整。",
+            "须项目负责人或至少一名管理员同意后，才能执行结束日期调整。",
             "warning",
         )
         return redirect(url_for("main.project_detail", project_id=p.id))
@@ -246,7 +246,7 @@ def project_end_approve(project_id: int):
         flash("项目不存在", "warning")
         return redirect(url_for("main.projects_list"))
 
-    if not is_admin() and not _is_project_member(p.id, current_user.id):
+    if not is_admin() and not _is_project_leader(current_user.id, p.id):
         flash("你不是该项目成员，无法同意", "danger")
         return redirect(url_for("main.projects_list"))
 
@@ -286,7 +286,7 @@ def project_end_approve(project_id: int):
         flash("终止项目已同意，条件满足已自动执行，项目已冻结", "success")
     else:
         db.session.commit()
-        flash("已同意终止项目，等待其他成员同意后自动执行", "success")
+        flash("已同意终止项目，等待项目负责人或管理员处理", "success")
     return redirect(url_for("main.project_detail", project_id=p.id))
 
 
@@ -370,7 +370,7 @@ def project_revive_approve(project_id: int):
         flash("项目不存在", "warning")
         return redirect(url_for("main.projects_list"))
 
-    if not is_admin() and not _is_project_member(p.id, current_user.id):
+    if not is_admin() and not _is_project_leader(current_user.id, p.id):
         flash("你不是该项目成员，无法同意", "danger")
         return redirect(url_for("main.projects_list"))
 
@@ -398,7 +398,7 @@ def project_revive_approve(project_id: int):
         flash("复活项目已同意，条件满足已自动执行，项目已恢复", "success")
     else:
         db.session.commit()
-        flash("已同意复活项目，等待其他成员同意后自动执行", "success")
+        flash("已同意复活项目，等待项目负责人或管理员处理", "success")
     return redirect(url_for("main.project_detail", project_id=p.id))
 
 
@@ -468,7 +468,7 @@ def projects_delete_request(project_id: int):
     db.session.flush()
 
     # admin 发起即自动执行删除
-    non_admin_ids = _project_non_admin_member_user_ids(int(p.id))
+    non_admin_ids = _approval_required_user_ids(int(p.id))
     approved_ids = {a.user_id for a in req.approvals}
     can_exec = (
         is_admin()
@@ -489,14 +489,14 @@ def projects_delete_request(project_id: int):
         return redirect(url_for("main.projects_list"))
 
     db.session.commit()
-    flash("已发起删除申请，待项目成员全部同意", "success")
+    flash("已发起删除申请，待项目负责人或管理员同意", "success")
     return redirect(url_for("main.project_detail", project_id=p.id))
 
 
 @bp.post("/projects/<int:project_id>/delete-approve")
 @login_required
 def projects_delete_approve(project_id: int):
-    if not is_admin() and not _is_project_member(project_id, current_user.id):
+    if not is_admin() and not _is_project_leader(current_user.id, project_id):
         flash("你不是该项目成员，无法同意删除", "danger")
         return redirect(url_for("main.projects_list"))
 
@@ -522,7 +522,7 @@ def projects_delete_approve(project_id: int):
 
     # 自动执行：条件满足时直接删除，无需再点「执行删除」
     p = db.session.get(Project, project_id)
-    non_admin_ids = _project_non_admin_member_user_ids(int(project_id))
+    non_admin_ids = _approval_required_user_ids(int(project_id))
     approved_ids = {a.user_id for a in req.approvals}
     can_exec = (
         is_admin()
@@ -544,7 +544,7 @@ def projects_delete_approve(project_id: int):
         return redirect(url_for("main.projects_list"))
     else:
         db.session.commit()
-        flash("已同意删除，等待其他成员同意后自动执行", "success")
+        flash("已同意删除，等待项目负责人或管理员处理", "success")
     return redirect(url_for("main.project_detail", project_id=project_id))
 
 
@@ -695,8 +695,8 @@ def projects_delete_execute(project_id: int):
 
     members = ProjectMember.query.filter_by(project_id=p.id).all()
     member_ids = {m.user_id for m in members}
-    # 非 admin 成员必须全部同意，才视为"全员就绪"
-    non_admin_ids = _project_non_admin_member_user_ids(int(p.id))
+    # 项目负责人或管理员同意后即可执行
+    non_admin_ids = _approval_required_user_ids(int(p.id))
     approved_ids = {a.user_id for a in req.approvals}
     if (
         not is_admin()
@@ -704,7 +704,7 @@ def projects_delete_execute(project_id: int):
         and not _approval_user_ids_include_any_admin(approved_ids)
     ):
         flash(
-            "须项目非管理员成员全部同意删除，或至少一名管理员在「同意删除」中确认后，才能执行删除。",
+            "须项目负责人或至少一名管理员同意后，才能执行删除。",
             "warning",
         )
         return redirect(url_for("main.project_detail", project_id=p.id))
@@ -786,7 +786,7 @@ def project_adjust_approve(project_id: int, adjustment_id: int):
     if not p:
         flash("项目不存在", "warning")
         return redirect(url_for("main.projects_list"))
-    if not is_admin() and not _is_project_member(p.id, current_user.id):
+    if not is_admin() and not _is_project_leader(current_user.id, p.id):
         flash("你不是该项目成员", "danger")
         return redirect(url_for("main.projects_list"))
 
@@ -818,7 +818,7 @@ def project_adjust_approve(project_id: int, adjustment_id: int):
         flash("追加应收已同意，条件满足已自动执行", "success")
     else:
         db.session.commit()
-        flash("已同意追加应收，等待其他成员同意后自动执行", "success")
+        flash("已同意追加应收，等待项目负责人或管理员处理", "success")
     return redirect(url_for("main.project_detail", project_id=p.id))
 
 

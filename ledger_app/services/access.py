@@ -71,6 +71,30 @@ def _project_non_admin_member_user_ids(project_id: int) -> set[int]:
     return {int(r.user_id) for r in rows}
 
 
+def _project_leader_user_id(project_id: int) -> int | None:
+    row = (
+        db.session.query(Project.leader_user_id)
+        .filter(Project.id == int(project_id))
+        .first()
+    )
+    if not row or row[0] is None:
+        return None
+    return int(row[0])
+
+
+def _approval_required_user_ids(project_id: int) -> set[int]:
+    """需要同意的关键人：项目负责人。
+
+    新规则：**管理员同意 或 项目负责人同意** 即可（管理员有绝对权力，不在此集合）。
+    """
+    leader = _project_leader_user_id(int(project_id))
+    return {leader} if leader else set()
+
+
+def _is_project_leader(user_id: int, project_id: int) -> bool:
+    return _project_leader_user_id(int(project_id)) == int(user_id)
+
+
 def _check_project_not_ended(project) -> bool:
     """检查项目是否已终止，已终止则 flash 提示并返回 False。"""
     if getattr(project, "status", None) == "ended":

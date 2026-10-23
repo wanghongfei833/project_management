@@ -290,7 +290,7 @@ def projects_edit(project_id: int):
 @bp.post("/projects/<int:project_id>/delete")
 @login_required
 def projects_delete(project_id: int):
-    flash("删除流程已升级：请在项目页发起删除申请并收集全员同意后执行删除。", "info")
+    flash("删除流程已升级：请在项目页发起删除申请，由项目负责人或管理员同意后执行删除。", "info")
     return redirect(url_for("main.project_detail", project_id=project_id))
 
 
@@ -583,8 +583,12 @@ def project_detail(project_id: int):
     approved_user_ids = set()
     if delete_req:
         approved_user_ids = {a.user_id for a in delete_req.approvals}
-    non_admin_member_ids = {u.id for u in members if u.role != Role.ADMIN.value}
-    delete_ready = bool(delete_req) and bool(non_admin_member_ids) and non_admin_member_ids.issubset(approved_user_ids)
+    approval_required_ids = _approval_required_user_ids(int(p.id))
+    delete_ready = (
+        bool(delete_req)
+        and bool(approval_required_ids)
+        and approval_required_ids.issubset(approved_user_ids)
+    )
 
     received_cents = int(
         db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
@@ -715,7 +719,9 @@ def project_detail(project_id: int):
     )
     end_change_can_execute = _project_end_date_change_can_execute(end_change_req)
     delete_can_execute = bool(delete_req) and (
-        delete_ready or _approval_user_ids_include_any_admin(approved_user_ids)
+        is_admin()
+        or delete_ready
+        or _approval_user_ids_include_any_admin(approved_user_ids)
     )
 
     end_change_form = ProjectEndDateChangeForm()
@@ -817,6 +823,7 @@ def project_detail(project_id: int):
         display_members=display_members,
         delete_req=delete_req,
         approved_user_ids=approved_user_ids,
+        approval_required_count=len(approval_required_ids),
         delete_ready=delete_ready,
         delete_can_execute=delete_can_execute,
         received_cents=int(received_cents),

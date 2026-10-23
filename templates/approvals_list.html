@@ -4,7 +4,7 @@
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
       <h1 class="h4 mb-0">待我处理</h1>
-      <div class="text-muted small">需要你点「同意」的申请；全部成员同意（或管理员同意）后自动生效</div>
+      <div class="text-muted small">需要你点「同意」的申请；项目负责人或管理员同意后自动生效</div>
     </div>
     <span class="badge {% if pending_count %}text-bg-danger{% else %}text-bg-success{% endif %} fs-6">
       {{ pending_count }} 待处理
@@ -23,7 +23,7 @@
 
   {% if waiting_items %}
     <h2 class="h6 text-muted mb-2">
-      <i class="bi bi-hourglass-split me-1"></i>我已同意，等待其他人（{{ waiting_items|length }}）
+      <i class="bi bi-hourglass-split me-1"></i>我已同意，等待负责人处理（{{ waiting_items|length }}）
     </h2>
     <div class="list-group shadow-sm mb-4">
       {% with items = waiting_items %}{% include "_pending_items.html" %}{% endwith %}

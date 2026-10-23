@@ -167,7 +167,7 @@
                 {% if pay_todo_count %}<span class="badge rounded-pill text-bg-info ms-1" title="财务待办">{{ pay_todo_count }}</span>{% endif %}
               </a>
             </li>
-            {% if is_admin or current_user.is_finance %}
+            {% if can_finance %}
               <li class="nav-item"><a class="nav-link {% if request.endpoint=='main.finance_page' %}active{% endif %}" href="{{ url_for('main.finance_page') }}">财务{% if pay_todo_count %}<span class="badge rounded-pill text-bg-info ms-1">{{ pay_todo_count }}</span>{% endif %}</a></li>
             {% endif %}
             {% if is_admin %}
@@ -257,7 +257,7 @@
               {% endif %}
             </div>
             <div class="modal-footer">
-              <div class="text-muted small me-auto">申请：全部成员同意（或管理员同意）后自动生效 · 日志：当天写完即完成</div>
+              <div class="text-muted small me-auto">申请：项目负责人或管理员同意后自动生效 · 日志：当天写完即完成</div>
               <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">稍后处理</button>
               <a class="btn btn-primary btn-sm" href="{{ url_for('main.approvals_list') }}">查看全部</a>
             </div>
