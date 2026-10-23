@@ -24,10 +24,19 @@
           <label class="form-label">发生日期</label>
           {{ form.occur_date(class="form-control") }}
         </div>
-        <div class="col-md-4 d-flex align-items-end">
+        <div class="col-md-4 d-flex align-items-end" id="settled_wrap">
           <div class="form-check">
             {{ form.settled(class="form-check-input") }}
             <label class="form-check-label">已到账/已付款</label>
+          </div>
+        </div>
+        <div class="col-12" id="workflow_wrap">
+          <div class="form-check">
+            {{ form.use_payment_workflow(class="form-check-input", id="use_payment_workflow") }}
+            <label class="form-check-label" for="use_payment_workflow">
+              <strong>走付款审批流程</strong>
+              <span class="text-muted small">（先审批 → 财务打款 → 上传回单闭环；勾选后「已付款」由财务打款时记录）</span>
+            </label>
           </div>
         </div>
         <div class="col-md-6">
@@ -104,6 +113,18 @@
 
   if (typeEl) typeEl.addEventListener('change', filterOptions);
   if (cpEl) cpEl.addEventListener('change', syncDisplay);
+  // 付款流程只对支出有效；勾选时隐藏「已付款」勾选框（由财务打款时记录）
+  var wf = document.getElementById('use_payment_workflow');
+  var settledWrap = document.getElementById('settled_wrap');
+  function syncWorkflow() {
+    if (!typeEl || !wf || !settledWrap) return;
+    var isExpense = typeEl.value === 'expense';
+    document.getElementById('workflow_wrap').style.display = isExpense ? '' : 'none';
+    settledWrap.style.display = (isExpense && wf.checked) ? 'none' : '';
+  }
+  if (wf) wf.addEventListener('change', syncWorkflow);
+  if (typeEl) typeEl.addEventListener('change', syncWorkflow);
+  syncWorkflow();
   filterOptions();
   syncDisplay();
 })();

@@ -564,6 +564,12 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
               {% if t.type == 'income' %}<span class="text-success fw-bold">+</span>{% else %}<span class="text-danger fw-bold">−</span>{% endif %}
               ¥ {{ t.amount_cents|money }}
               {% if t.settled %}<span class="badge text-bg-success-subtle text-success border-success-subtle" style="font-size:.6rem;">已到账</span>{% else %}<span class="badge text-bg-warning-subtle text-warning border-warning-subtle" style="font-size:.6rem;">未到账</span>{% endif %}
+              {% set pay_labels = {'pending': '待审批', 'approved': '待打款', 'paid': '待补回单', 'closed': '已闭环', 'rejected': '已驳回'} %}
+              {% if t.payment_status %}
+                <span class="badge {% if t.payment_status == 'closed' %}text-bg-success{% elif t.payment_status == 'rejected' %}text-bg-danger{% else %}text-bg-info{% endif %}" style="font-size:.6rem;">
+                  {{ pay_labels.get(t.payment_status, t.payment_status) }}
+                </span>
+              {% endif %}
               {% if t.status == 'active' and project.status != 'ended' and current_user.id in member_ids %}
                 <div class="dropdown d-inline ms-1">
                   <a href="#" class="text-muted dropdown-toggle text-decoration-none" data-bs-toggle="dropdown" aria-expanded="false" style="font-size:.85rem;">⚙️</a>

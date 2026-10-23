@@ -179,6 +179,10 @@ class TransactionForm(FlaskForm):
     )
     occur_date = DateField("发生日期", default=date.today, validators=[DataRequired()])
     settled = BooleanField("已到账/已付款", default=True)
+    use_payment_workflow = BooleanField(
+        "走付款审批流程（先审批 → 财务打款 → 上传回单）",
+        default=True,
+    )
     counterparty = SelectField("对方", coerce=str, validators=[DataRequired()], choices=[], validate_choice=False)
     recipient_user_id = SelectField("项目人员", coerce=int, validators=[Optional()], choices=[], validate_choice=False)
     note = TextAreaField("备注", validators=[Optional(), Length(max=2000)])
@@ -236,6 +240,7 @@ class UserEditForm(FlaskForm):
         validators=[DataRequired()],
     )
     is_active = BooleanField("启用", default=True)
+    is_finance = BooleanField("财务（可打款、确认到账）", default=False)
 
 
 class ChangePasswordForm(FlaskForm):

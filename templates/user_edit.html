@@ -40,6 +40,12 @@
                   <label class="form-check-label">启用账号</label>
                 </div>
               </div>
+              <div class="col-12">
+                <div class="form-check">
+                  {{ form.is_finance(class="form-check-input") }}
+                  <label class="form-check-label">财务（可执行打款、确认到账）<span class="text-muted small">管理员默认拥有财务权限</span></label>
+                </div>
+              </div>
             </div>
 
             <div class="mt-3 d-flex gap-2">

@@ -1,6 +1,8 @@
 """transactions.py：路由实现（原 routes.py 拆分而来，URL/行为不变）。"""
 from ._common import *  # noqa: F401,F403
 
+from ..services.payments import PAYMENT_APPROVED, PAYMENT_PENDING
+
 
 
 @bp.get("/transactions")
@@ -95,11 +97,22 @@ def transactions_new():
         if not db.session.get(Project, pid):
             flash("所选项目不存在", "warning")
             return render_template("transaction_form.html", form=form, is_admin=is_admin())
+        is_workflow_expense = (
+            form.type.data == TransactionType.EXPENSE.value
+            and bool(form.use_payment_workflow.data)
+        )
         tx_status = "active" if is_admin() else "pending"
+        if is_workflow_expense:
+            tx_settled = False
+            payment_status = PAYMENT_PENDING if tx_status == "pending" else PAYMENT_APPROVED
+        else:
+            tx_settled = bool(form.settled.data)
+            payment_status = None
         tx = Transaction(
             project_id=pid, status=tx_status, type=form.type.data,
             amount_cents=yuan_to_cents(form.amount_yuan.data),
-            occur_date=form.occur_date.data, settled=bool(form.settled.data),
+            occur_date=form.occur_date.data, settled=tx_settled,
+            payment_status=payment_status,
             counterparty=form.counterparty.data or None,
             recipient_user_id=form.recipient_user_id.data if form.counterparty.data == CP_EXPENSE_MEMBER else None,
             note=form.note.data or None, created_by_user_id=current_user.id,
@@ -115,16 +128,25 @@ def transactions_new():
             db.session.add(TransactionCreateApproval(request_id=creq.id, user_id=current_user.id))
             _log_project_activity(pid, "transaction.create_request",
                 f"发起新增流水 #{tx.id} 审批：{typ} ¥{format_cents(int(tx.amount_cents))}，日期 {tx.occur_date}"
+                + ("（付款申请：审批通过后待财务打款）" if is_workflow_expense else "")
                 + (f"，附件 {added} 个" if added else ""), detail=f"request_id={creq.id}")
         else:
             _log_project_activity(pid, "transaction.create",
                 f"新增流水 #{tx.id}：{typ} ¥{format_cents(int(tx.amount_cents))}，日期 {tx.occur_date}"
+                + ("（付款申请：待财务打款）" if is_workflow_expense else "")
                 + (f"，附件 {added} 个" if added else ""))
         db.session.commit()
         if tx_status == "pending":
-            flash("已提交新增流水申请，待审核通过后生效。", "success")
+            flash(
+                "已提交付款申请，审批通过后由财务打款。" if is_workflow_expense
+                else "已提交新增流水申请，待审核通过后生效。",
+                "success",
+            )
         else:
-            flash(f"流水已新增{'，已保存 ' + str(added) + ' 个凭证文件' if added else ''}", "success")
+            if is_workflow_expense:
+                flash("付款申请已生效，等待财务打款（打款后请上传回单闭环）。", "success")
+            else:
+                flash(f"流水已新增{'，已保存 ' + str(added) + ' 个凭证文件' if added else ''}", "success")
         return redirect(url_for("main.project_detail", project_id=pid))
     return render_template("transaction_form.html", form=form, is_admin=is_admin())
 
@@ -609,6 +631,8 @@ def transactions_create_approve(transaction_id: int):
     # 自动执行：条件满足时直接生效，无需再点「执行生效」
     if _transaction_create_can_execute(req):
         tx.status = "active"
+        if tx.type == TransactionType.EXPENSE.value and tx.payment_status == PAYMENT_PENDING:
+            tx.payment_status = PAYMENT_APPROVED
         req.status = "executed"
         req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
@@ -651,6 +675,8 @@ def transactions_create_execute(transaction_id: int):
         return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     tx.status = "active"
+    if tx.type == TransactionType.EXPENSE.value and tx.payment_status == PAYMENT_PENDING:
+        tx.payment_status = PAYMENT_APPROVED
     req.status = "executed"
     req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     req.executed_by_user_id = current_user.id

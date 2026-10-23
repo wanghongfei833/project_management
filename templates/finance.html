@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}财务打款 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h4 mb-0">财务 · 打款闭环</h1>
+      <div class="text-muted small">
+        流程：付款申请 → 审批 → <strong>财务打款</strong> → 上传回单 → 闭环
+        {% if not finance %}（你当前只能查看/补传自己发起的回单）{% endif %}
+      </div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.export_payments_csv') }}">导出付款台账 CSV</a>
+  </div>
+
+  {% if finance %}
+    <h2 class="h6 text-muted mt-4 mb-2">待打款（{{ payments|length }}）</h2>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>项目</th><th>用途 / 说明</th><th class="text-end">申请金额</th>
+            <th>报销人</th><th>申请时间</th><th style="min-width:420px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in payments %}
+            {% set tx = item.tx %}
+            <tr {% if focus == tx.id %}class="table-warning"{% endif %}>
+              <td><a class="text-decoration-none" href="{{ url_for('main.project_detail', project_id=tx.project_id) }}">{{ item.project_name }}</a></td>
+              <td class="small">
+                {{ tx.counterparty or '—' }}{% if tx.note %}<div class="text-muted text-truncate" style="max-width:260px;">{{ tx.note }}</div>{% endif %}
+              </td>
+              <td class="text-end fw-semibold">¥ {{ tx.amount_cents|money }}</td>
+              <td class="small">{{ item.requester }}</td>
+              <td class="small text-muted">{{ tx.created_at|dt }}</td>
+              <td>
+                <form method="post" action="{{ url_for('main.finance_pay', transaction_id=tx.id) }}" class="d-flex gap-1 flex-wrap align-items-center">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input class="form-control form-control-sm" style="width:110px;" name="paid_amount_yuan"
+                         value="{{ '%.2f'|format((tx.amount_cents or 0)/100) }}" title="实付金额（元）">
+                  <select class="form-select form-select-sm" style="width:100px;" name="payment_method">
+                    {% for m in pay_methods %}<option>{{ m }}</option>{% endfor %}
+                  </select>
+                  <button class="btn btn-sm btn-success" type="submit"
+                          onclick="return confirm('确认打款？打款后进入「待补回单」。');">打款</button>
+                </form>
+                <form method="post" action="{{ url_for('main.finance_reject', transaction_id=tx.id) }}" class="d-flex gap-1 mt-1">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input class="form-control form-control-sm" name="reason" placeholder="驳回原因（可选）">
+                  <button class="btn btn-sm btn-outline-danger" type="submit"
+                          onclick="return confirm('确认驳回这笔付款申请？');">驳回</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="text-muted">没有待打款的支出 🎉</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  <h2 class="h6 text-muted mt-4 mb-2">待补回单（{{ receipts|length }}）</h2>
+  <div class="table-responsive mb-4">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>项目</th><th class="text-end">金额</th><th class="text-end">实付</th>
+          <th>付款时间</th><th>付款人</th><th>报销人</th><th style="min-width:320px;">上传回单</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in receipts %}
+          {% set tx = item.tx %}
+          <tr {% if focus == tx.id %}class="table-warning"{% endif %}>
+            <td><a class="text-decoration-none" href="{{ url_for('main.project_detail', project_id=tx.project_id) }}">{{ item.project_name }}</a></td>
+            <td class="text-end fw-semibold">¥ {{ tx.amount_cents|money }}</td>
+            <td class="text-end">¥ {{ (tx.paid_amount_cents or tx.amount_cents)|money }}</td>
+            <td class="small text-muted">{{ tx.paid_at|dt }}</td>
+            <td class="small">{{ tx.paid_by.username if tx.paid_by else '—' }}</td>
+            <td class="small">{{ item.requester }}</td>
+            <td>
+              <form method="post" enctype="multipart/form-data"
+                    action="{{ url_for('main.finance_upload_receipt', transaction_id=tx.id) }}" class="d-flex gap-1">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input class="form-control form-control-sm" type="file" name="attachments" multiple>
+                <button class="btn btn-sm btn-outline-primary flex-shrink-0" type="submit">上传闭环</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="text-muted">没有待补回单的交易 🎉</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if finance %}
+    <h2 class="h6 text-muted mt-4 mb-2">待确认到账（{{ incomes|length }}）</h2>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm align-middle">
+        <thead><tr><th>项目</th><th>对方</th><th class="text-end">金额</th><th>日期</th><th class="text-end">操作</th></tr></thead>
+        <tbody>
+          {% for item in incomes %}
+            {% set tx = item.tx %}
+            <tr {% if focus == tx.id %}class="table-warning"{% endif %}>
+              <td><a class="text-decoration-none" href="{{ url_for('main.project_detail', project_id=tx.project_id) }}">{{ item.project_name }}</a></td>
+              <td class="small">{{ tx.counterparty or '—' }}</td>
+              <td class="text-end fw-semibold">¥ {{ tx.amount_cents|money }}</td>
+              <td class="small text-muted">{{ tx.occur_date }}</td>
+              <td class="text-end">
+                <form method="post" action="{{ url_for('main.finance_confirm_income', transaction_id=tx.id) }}" class="d-inline"
+                      onsubmit="return confirm('确认这笔收入已经到账？');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-success" type="submit">确认到账</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="text-muted">没有待确认到账的收入 🎉</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <h2 class="h6 text-muted mt-4 mb-2">最近闭环</h2>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead><tr><th>项目</th><th>类型</th><th class="text-end">金额</th><th>付款/到账时间</th><th>闭环时间</th><th>状态</th></tr></thead>
+        <tbody>
+          {% for tx in closed %}
+            <tr>
+              <td class="small">{{ tx.project.name if tx.project else '—' }}</td>
+              <td class="small">{{ '收入' if tx.type == 'income' else '支出' }}</td>
+              <td class="text-end">¥ {{ tx.amount_cents|money }}</td>
+              <td class="small text-muted">{{ tx.paid_at|dt }}</td>
+              <td class="small text-muted">{{ tx.closed_at|dt }}</td>
+              <td><span class="badge text-bg-success">{{ status_label(tx) }}</span></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="text-muted">还没有已闭环的记录</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+{% endblock %}

@@ -23,6 +23,8 @@ class User(db.Model, UserMixin):
     # 手机号：用于待办超时短信提醒（admin 在用户管理里维护）
     phone = db.Column(db.String(32), nullable=True)
     role = db.Column(db.String(16), nullable=False, default=Role.VIEWER.value)
+    # 财务：可以执行打款、确认到账（管理员默认拥有财务权限）
+    is_finance = db.Column(db.Boolean, nullable=False, default=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
@@ -508,6 +510,14 @@ class Transaction(db.Model):
     recipient_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
     note = db.Column(db.Text, nullable=True)
     is_void = db.Column(db.Boolean, nullable=False, default=False)
+    # 付款闭环（仅支出/到账确认使用）：pending→approved→paid→closed；rejected 驳回
+    payment_status = db.Column(db.String(16), nullable=True, index=True)
+    paid_amount_cents = db.Column(db.BigInteger, nullable=True)  # 实付金额（可能≠申请金额）
+    paid_at = db.Column(db.DateTime, nullable=True)             # 付款/到账时间
+    paid_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    payment_method = db.Column(db.String(32), nullable=True)    # 转账/现金/微信/支付宝…
+    closed_at = db.Column(db.DateTime, nullable=True)           # 回单齐全、闭环时间
+    reject_reason = db.Column(db.String(255), nullable=True)
     created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
@@ -517,6 +527,7 @@ class Transaction(db.Model):
     delete_requests = db.relationship("TransactionDeleteRequest", back_populates="transaction")
     created_by = db.relationship("User", foreign_keys=[created_by_user_id])
     recipient_user = db.relationship("User", foreign_keys=[recipient_user_id])
+    paid_by = db.relationship("User", foreign_keys=[paid_by_user_id])
 
 
 class TransactionEditRequest(db.Model):

@@ -888,8 +888,39 @@ def _migration_0001_historical_catchup() -> None:
 
 
 # 迁移清单：(版本号, 说明, 执行函数)。新增迁移请往后追加，不要改历史条目。
+def _migration_0002_payment_workflow() -> None:
+    """付款闭环：用户财务权限 + 流水的付款/回单字段。"""
+    if _table_exists("users") and not _column_exists("users", "is_finance"):
+        db.session.execute(
+            text("ALTER TABLE users ADD COLUMN is_finance BOOLEAN NOT NULL DEFAULT 0")
+        )
+    tx_columns = [
+        ("payment_status", "VARCHAR(16)"),
+        ("paid_amount_cents", "BIGINT"),
+        ("paid_at", "DATETIME"),
+        ("paid_by_user_id", "INTEGER REFERENCES users(id)"),
+        ("payment_method", "VARCHAR(32)"),
+        ("closed_at", "DATETIME"),
+        ("reject_reason", "VARCHAR(255)"),
+    ]
+    if _table_exists("transactions"):
+        for name, ddl in tx_columns:
+            if not _column_exists("transactions", name):
+                db.session.execute(
+                    text(f"ALTER TABLE transactions ADD COLUMN {name} {ddl}")
+                )
+        db.session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_transactions_payment_status "
+                "ON transactions (payment_status)"
+            )
+        )
+    db.session.commit()
+
+
 MIGRATIONS: list[tuple[str, str, Callable[[], None]]] = [
     ("0001", "历史建表/补列汇总（v0 → 2026-10 的全部列与表）", _migration_0001_historical_catchup),
+    ("0002", "付款闭环：users.is_finance + transactions 付款/回单字段", _migration_0002_payment_workflow),
 ]
 
 

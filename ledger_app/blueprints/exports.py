@@ -1,6 +1,8 @@
 """exports.py：路由实现（原 routes.py 拆分而来，URL/行为不变）。"""
 from ._common import *  # noqa: F401,F403
 
+from ..services.payments import PAYMENT_LABELS, pending_amount_by_project
+
 
 
 @bp.get("/search")
@@ -148,6 +150,8 @@ def export_projects_csv():
     }
 
     rows = []
+    pay_unpaid = pending_amount_by_project(expense=True)
+    receipt_pending = pending_amount_by_project(expense=False)
     for p in projects:
 
         def _sum(*filters) -> int:
@@ -185,14 +189,60 @@ def export_projects_csv():
                 "%.2f" % ((received - expense - fin["broker_unpaid_cents"]) / 100),
                 "%.2f" % (dm.paid_cents / 100),
                 "%.2f" % (dm.remaining_cents / 100),
+                "%.2f" % (pay_unpaid.get(int(p.id), 0) / 100),
+                "%.2f" % (receipt_pending.get(int(p.id), 0) / 100),
             ]
         )
     header = [
         "项目", "状态", "应收(含介绍费)", "介绍费", "我方净应收", "已收",
         "已付中介费", "还欠中介费", "剩余应收", "未收净额(我方)",
         "支出", "净利润", "已分红", "剩余可分红",
+        "待打款", "待补回单",
     ]
     return _csv_response(header, rows, f"projects-{date.today():%Y%m%d}.csv")
+
+
+@bp.get("/export/payments.csv")
+@login_required
+def export_payments_csv():
+    """付款台账：申请 → 审批 → 打款 → 回单 全链路。"""
+    q = Transaction.query.options(
+        joinedload(Transaction.project),
+        joinedload(Transaction.created_by),
+        joinedload(Transaction.paid_by),
+        joinedload(Transaction.attachments),
+    ).filter(
+        Transaction.project_id.isnot(None),
+        Transaction.payment_status.isnot(None),
+    )
+    q = _apply_transaction_project_access_filter(q)
+    rows = []
+    for tx in q.order_by(Transaction.created_at.desc(), Transaction.id.desc()).all():
+        rows.append(
+            [
+                tx.project.name if tx.project else "",
+                "收入" if tx.type == TransactionType.INCOME.value else "支出",
+                tx.counterparty or "",
+                "%.2f" % (int(tx.amount_cents or 0) / 100),
+                PAYMENT_LABELS.get(tx.payment_status, tx.payment_status or ""),
+                "%.2f" % ((int(tx.paid_amount_cents) if tx.paid_amount_cents is not None else 0) / 100),
+                tx.payment_method or "",
+                tx.paid_at.strftime("%Y-%m-%d %H:%M") if tx.paid_at else "",
+                tx.paid_by.username if tx.paid_by else "",
+                tx.closed_at.strftime("%Y-%m-%d %H:%M") if tx.closed_at else "",
+                str(len(tx.attachments)),
+                tx.created_by.username if tx.created_by else "",
+                tx.created_at.strftime("%Y-%m-%d %H:%M") if tx.created_at else "",
+                (tx.reject_reason or ""),
+                (tx.note or "").replace("\n", " "),
+            ]
+        )
+    header = [
+        "项目", "类型", "用途/对方", "申请金额", "闭环状态", "实付金额",
+        "付款方式", "付款时间", "付款人", "闭环时间", "回单数",
+        "报销人", "申请时间", "驳回原因", "备注",
+    ]
+    return _csv_response(header, rows, f"payments-{date.today():%Y%m%d}.csv")
 
 
 @bp.get("/earnings")

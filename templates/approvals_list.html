@@ -38,4 +38,15 @@
       {% with items = log_items %}{% include "_log_todo_items.html" %}{% endwith %}
     </div>
   {% endif %}
+
+  {% if pay_items or receipt_items or income_items %}
+    <h2 class="h6 text-muted mb-2">
+      <i class="bi bi-cash-coin me-1"></i>财务待办（{{ pay_todo_count }}）
+    </h2>
+    <div class="list-group shadow-sm mb-4">
+      {% with items = pay_items %}{% include "_pay_todo_items.html" %}{% endwith %}
+      {% with items = receipt_items %}{% include "_pay_todo_items.html" %}{% endwith %}
+      {% with items = income_items %}{% include "_pay_todo_items.html" %}{% endwith %}
+    </div>
+  {% endif %}
 {% endblock %}

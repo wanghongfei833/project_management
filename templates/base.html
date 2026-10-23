@@ -161,11 +161,15 @@
             <li class="nav-item"><a class="nav-link {% if request.endpoint=='main.search' %}active{% endif %}" href="{{ url_for('main.search') }}">搜索</a></li>
             <li class="nav-item">
               <a class="nav-link {% if request.endpoint=='main.approvals_list' %}active{% endif %}" href="{{ url_for('main.approvals_list') }}">
-                <i class="bi bi-bell{% if pending_count or log_todo_count %} bell-ring{% endif %}"></i> 待办
+                <i class="bi bi-bell{% if pending_count or log_todo_count or pay_todo_count %} bell-ring{% endif %}"></i> 待办
                 {% if pending_count %}<span class="badge rounded-pill text-bg-danger ms-1">{{ pending_count }}</span>{% endif %}
                 {% if log_todo_count %}<span class="badge rounded-pill text-bg-warning ms-1" title="今天待写日志">{{ log_todo_count }}</span>{% endif %}
+                {% if pay_todo_count %}<span class="badge rounded-pill text-bg-info ms-1" title="财务待办">{{ pay_todo_count }}</span>{% endif %}
               </a>
             </li>
+            {% if is_admin or current_user.is_finance %}
+              <li class="nav-item"><a class="nav-link {% if request.endpoint=='main.finance_page' %}active{% endif %}" href="{{ url_for('main.finance_page') }}">财务{% if pay_todo_count %}<span class="badge rounded-pill text-bg-info ms-1">{{ pay_todo_count }}</span>{% endif %}</a></li>
+            {% endif %}
             {% if is_admin %}
               <li class="nav-item"><a class="nav-link {% if request.endpoint=='main.sms_list' %}active{% endif %}" href="{{ url_for('main.sms_list') }}">短信</a></li>
               <li class="nav-item"><a class="nav-link {% if request.endpoint in ['main.users_list','main.users_new','main.users_edit'] %}active{% endif %}" href="{{ url_for('main.users_list') }}">用户</a></li>
@@ -220,7 +224,7 @@
           <div class="modal-content">
             <div class="modal-header">
               <h5 class="modal-title">
-                <i class="bi bi-bell-fill text-warning me-2"></i>你有 {{ pending_count + log_todo_count }} 件事待处理
+                <i class="bi bi-bell-fill text-warning me-2"></i>你有 {{ pending_count + log_todo_count + pay_todo_count }} 件事待处理
               </h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
             </div>
@@ -239,6 +243,16 @@
                 </div>
                 <div class="list-group list-group-flush">
                   {% with items = log_todo_items[:8] %}{% include "_log_todo_items.html" %}{% endwith %}
+                </div>
+              {% endif %}
+              {% if pay_todo_items or receipt_todo_items or income_todo_items %}
+                <div class="px-3 pt-3 pb-1 small fw-semibold text-muted {% if pending_items or log_todo_items %}border-top{% endif %}">
+                  财务待办（{{ pay_todo_count }}）
+                </div>
+                <div class="list-group list-group-flush">
+                  {% with items = pay_todo_items[:8] %}{% include "_pay_todo_items.html" %}{% endwith %}
+                  {% with items = receipt_todo_items[:8] %}{% include "_pay_todo_items.html" %}{% endwith %}
+                  {% with items = income_todo_items[:8] %}{% include "_pay_todo_items.html" %}{% endwith %}
                 </div>
               {% endif %}
             </div>

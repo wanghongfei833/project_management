@@ -102,6 +102,7 @@ def users_edit(user_id: int):
         form.phone.data = u.phone or ""
         form.role.data = u.role
         form.is_active.data = bool(u.is_active)
+        form.is_finance.data = bool(u.is_finance)
 
     if form.validate_on_submit():
         if u.username == "admin" and form.role.data != Role.ADMIN.value:
@@ -125,6 +126,7 @@ def users_edit(user_id: int):
         u.phone = phone
         u.role = form.role.data
         u.is_active = bool(form.is_active.data)
+        u.is_finance = bool(form.is_finance.data)
         db.session.commit()
         flash("用户已更新", "success")
         return redirect(url_for("main.users_list"))

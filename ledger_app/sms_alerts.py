@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from .extensions import db
 from .models import Role, SmsNotification, SmsNotificationProject, User
 from .pending import PendingItem, pending_items_for_user
+from .services.payments import finance_todos
 from .timeutil import TZ_OFFSET
 from .sms import (
     is_valid_phone,
@@ -111,7 +112,16 @@ def build_alert_plans(
             int(user.id), is_admin_user=(user.role == Role.ADMIN.value)
         )
         todo = [i for i in items if not i.approved_by_me]
-        if not todo:
+        # 付款闭环待办（待打款/待补回单/待确认到账）也算「未做事项」
+        try:
+            pay = finance_todos(
+                user_id=int(user.id),
+                finance=(user.role == Role.ADMIN.value or bool(user.is_finance)),
+            )
+            pay_items = pay["payments"] + pay["receipts"] + pay["income"]
+        except Exception:  # pragma: no cover
+            pay_items = []
+        if not todo and not pay_items:
             skipped["no_pending"] += 1
             continue
 
@@ -119,15 +129,28 @@ def build_alert_plans(
             skipped["already_reminded"] += 1
             continue
 
-        oldest = min((i.created_at for i in todo if i.created_at is not None), default=None)
+        oldest = min(
+            [i.created_at for i in todo if i.created_at is not None]
+            + [i.created_at for i in pay_items if i.created_at is not None],
+            default=None,
+        )
+        projects = _project_breakdown(todo)
+        if pay_items:
+            pay_counts: dict[tuple[int | None, str], int] = {}
+            for it in pay_items:
+                key = (it.project_id, it.project_name)
+                pay_counts[key] = pay_counts.get(key, 0) + 1
+            projects += [
+                (pid, name, cnt) for (pid, name), cnt in pay_counts.items()
+            ]
         plans.append(
             AlertPlan(
                 user_id=int(user.id),
                 username=user.username,
                 phone=phone,
-                pending_count=len(todo),
+                pending_count=len(todo) + len(pay_items),
                 oldest_at=oldest,
-                projects=_project_breakdown(todo),
+                projects=projects,
             )
         )
 

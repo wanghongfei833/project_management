@@ -46,7 +46,17 @@
             <td>{{ t.project.name if t.project else '（无）' }}</td>
             <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
             <td class="text-end">¥ {{ t.amount_cents|money }}</td>
-            <td>{{ '已结算' if t.settled else '未结算' }}</td>
+            <td>
+              {{ '已结算' if t.settled else '未结算' }}
+              {% set pay_labels = {'pending': '待审批', 'approved': '待打款', 'paid': '待补回单', 'closed': '已闭环', 'rejected': '已驳回'} %}
+              {% if t.payment_status %}
+                <div class="small mt-1">
+                  <span class="badge {% if t.payment_status == 'closed' %}text-bg-success{% elif t.payment_status == 'rejected' %}text-bg-danger{% else %}text-bg-info{% endif %}">
+                    {{ pay_labels.get(t.payment_status, t.payment_status) }}
+                  </span>
+                </div>
+              {% endif %}
+            </td>
             <td>{% if t.counterparty == '项目人员' and t.recipient_user %}{{ t.recipient_user.username }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
             <td>
               {% for a in t.attachments %}

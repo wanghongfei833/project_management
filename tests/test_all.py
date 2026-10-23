@@ -1913,3 +1913,171 @@ class TestSchemaMigrations:
         ).mappings().all()
         cols = {r["name"] for r in rows}
         assert {"version", "note", "applied_at"} <= cols
+
+
+class TestPaymentWorkflow:
+    """付款闭环：申请 → 审批 → 财务打款 → 上传回单 → 闭环；驳回与到账确认。"""
+
+    @staticmethod
+    def _project(name="ProjPay"):
+        seed = get_seed()
+        p = Project.query.filter_by(name=name).first()
+        if p:
+            return p
+        p = Project(
+            name=name, expected_income_cents=0, broker_fee_mode="percent",
+            broker_fee_direction="we_pay_separate", referral_ratio=Decimal("0"),
+            status="open", leader_user_id=seed["users"]["wang"],
+            planned_start_date=date(2026, 1, 1), planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        for uname in ["admin", "wang", "si"]:
+            _db.session.add(ProjectMember(project_id=p.id, user_id=seed["users"][uname]))
+        _db.session.commit()
+        return p
+
+    def _new_expense(self, client, project_id, amount="1000.00"):
+        return client.post("/transactions/new", data={
+            "project_id": project_id, "type": "expense",
+            "amount_yuan": amount, "occur_date": date.today().isoformat(),
+            "counterparty": "供应商", "note": "报销测试",
+            "use_payment_workflow": "y",
+        }, follow_redirects=True)
+
+    def test_full_closed_loop(self, client):
+        import io
+
+        seed = get_seed()
+        p = self._project()
+
+        # 1) 王洪飞发起报销 → 待审批、未结算
+        login(client, "wang")
+        self._new_expense(client, p.id, "1000.00")
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, type="expense")
+            .order_by(Transaction.id.desc()).first()
+        )
+        assert tx is not None
+        assert tx.status == "pending"
+        assert tx.settled is False
+        assert tx.payment_status == "pending"
+
+        # 2) 胡文泰同意 → 已批准待付款
+        client.post("/logout")
+        login(client, "si")
+        client.post(f"/transactions/{tx.id}/create-approve", follow_redirects=True)
+        _db.session.refresh(tx)
+        assert tx.status == "active"
+        assert tx.payment_status == "approved"
+        assert tx.settled is False
+
+        # 3) 财务（admin）打款 → 已付款待回单
+        client.post("/logout")
+        login(client, "admin", "admin123!")
+        rv = client.post(f"/finance/payments/{tx.id}/pay", data={
+            "paid_amount_yuan": "980.00", "payment_method": "银行转账",
+        }, follow_redirects=True)
+        assert rv.status_code == 200
+        _db.session.refresh(tx)
+        assert tx.settled is True
+        assert tx.paid_amount_cents == 98_000
+        assert tx.paid_at is not None
+        assert tx.paid_by_user_id == seed["users"]["admin"]
+        assert tx.payment_status == "paid"
+
+        # 4) 上传回单 → 闭环
+        rv = client.post(
+            f"/finance/payments/{tx.id}/receipt",
+            data={"attachments": (io.BytesIO(b"fake-image-bytes"), "receipt.jpg")},
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        assert rv.status_code == 200
+        _db.session.refresh(tx)
+        assert tx.payment_status == "closed"
+        assert tx.closed_at is not None
+        assert len(tx.attachments) == 1
+
+        # 财务页能看到闭环记录
+        html = client.get("/finance").get_data(as_text=True)
+        assert "最近闭环" in html and p.name in html
+
+    def test_finance_page_and_reject(self, client):
+        seed = get_seed()
+        p = self._project("ProjPayReject")
+        login(client, "wang")
+        self._new_expense(client, p.id, "300.00")
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, type="expense")
+            .order_by(Transaction.id.desc()).first()
+        )
+
+        # 财务页：普通用户可访问（只看到自己的回单区），但没有待打款
+        rv = client.get("/finance")
+        assert rv.status_code == 200
+
+        # admin 驳回
+        client.post("/logout")
+        login(client, "admin", "admin123!")
+        rv = client.post(
+            f"/finance/payments/{tx.id}/reject",
+            data={"reason": "发票不合规"}, follow_redirects=True,
+        )
+        assert rv.status_code == 200
+        _db.session.refresh(tx)
+        assert tx.is_void is True
+        assert tx.payment_status == "rejected"
+        assert tx.reject_reason == "发票不合规"
+
+    def test_income_confirm(self, client):
+        seed = get_seed()
+        p = self._project("ProjPayIncome")
+        login(client, "admin", "admin123!")
+        client.post("/transactions/new", data={
+            "project_id": p.id, "type": "income",
+            "amount_yuan": "5000.00", "occur_date": date.today().isoformat(),
+            "counterparty": "业主[甲方]", "note": "待确认到账",
+            # 不勾 settled → 未到账
+        }, follow_redirects=True)
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, type="income")
+            .order_by(Transaction.id.desc()).first()
+        )
+        assert tx.settled is False
+        html = client.get("/finance").get_data(as_text=True)
+        assert "待确认到账" in html
+
+        client.post(f"/finance/income/{tx.id}/confirm", follow_redirects=True)
+        _db.session.refresh(tx)
+        assert tx.settled is True
+        assert tx.payment_status == "paid"
+
+    def test_admin_sees_payment_todo(self, client, monkeypatch):
+        """待打款会进入财务待办，也会计入每晚短信的待办条数。"""
+        seed = get_seed()
+        p = self._project("ProjPayTodo")
+        login(client, "wang")
+        self._new_expense(client, p.id, "700.00")
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, type="expense")
+            .order_by(Transaction.id.desc()).first()
+        )
+        client.post("/logout")
+        login(client, "si")
+        client.post(f"/transactions/{tx.id}/create-approve", follow_redirects=True)
+        client.post("/logout")
+        login(client, "admin", "admin123!")
+
+        html = client.get("/approvals").get_data(as_text=True)
+        assert "财务待办" in html and "待打款" in html
+
+        admin = _db.session.get(User, seed["users"]["admin"])
+        admin.phone = "13800000001"
+        _db.session.commit()
+        from ledger_app.sms_alerts import build_alert_plans
+
+        plans, _skipped = build_alert_plans(user_id=admin.id, force=True)
+        mine = [pl for pl in plans if pl.user_id == admin.id]
+        assert mine and mine[0].pending_count >= 1
+        assert any(pid == p.id for pid, _n, _c in mine[0].projects)

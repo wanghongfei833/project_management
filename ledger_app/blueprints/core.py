@@ -1,6 +1,7 @@
 """core.py：路由实现（原 routes.py 拆分而来，URL/行为不变）。"""
 from ._common import *  # noqa: F401,F403
 
+from ..services.payments import can_pay, finance_todos
 
 
 @bp.before_request
@@ -25,9 +26,23 @@ def _load_pending_approvals():
         current_app.logger.exception("计算待写日志失败")
         g.log_todo_items = []
     g.log_todo_count = len(g.log_todo_items)
+    # 付款闭环待办：待打款 / 待补回单 / 待确认到账
+    try:
+        pay_todos = finance_todos(
+            user_id=int(current_user.id), finance=can_pay()
+        )
+    except Exception:  # pragma: no cover
+        current_app.logger.exception("计算付款闭环待办失败")
+        pay_todos = {"payments": [], "receipts": [], "income": []}
+    g.pay_todos = pay_todos["payments"]
+    g.receipt_todos = pay_todos["receipts"]
+    g.income_todos = pay_todos["income"]
+    g.pay_todo_count = (
+        len(g.pay_todos) + len(g.receipt_todos) + len(g.income_todos)
+    )
     # 登录后第一次打开页面时弹窗提醒；只弹一次（待办 或 待写日志 任一非空就弹）
     g.show_pending_modal = bool(session.pop("show_pending_modal", False)) and bool(
-        g.pending_items or g.log_todo_items
+        g.pending_items or g.log_todo_items or g.pay_todo_count
     )
 
 
@@ -58,6 +73,10 @@ def approvals_list():
         pending_count=getattr(g, "pending_count", 0),
         log_items=getattr(g, "log_todo_items", []),
         log_count=getattr(g, "log_todo_count", 0),
+        pay_items=getattr(g, "pay_todos", []),
+        receipt_items=getattr(g, "receipt_todos", []),
+        income_items=getattr(g, "income_todos", []),
+        pay_todo_count=getattr(g, "pay_todo_count", 0),
         is_admin=is_admin(),
     )
 

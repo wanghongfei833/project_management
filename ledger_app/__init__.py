@@ -130,6 +130,10 @@ def create_app():
             "pending_waiting": getattr(g, "pending_waiting", []),
             "log_todo_items": getattr(g, "log_todo_items", []),
             "log_todo_count": getattr(g, "log_todo_count", 0),
+            "pay_todo_items": getattr(g, "pay_todos", []),
+            "receipt_todo_items": getattr(g, "receipt_todos", []),
+            "income_todo_items": getattr(g, "income_todos", []),
+            "pay_todo_count": getattr(g, "pay_todo_count", 0),
             "show_pending_modal": getattr(g, "show_pending_modal", False),
         }
 

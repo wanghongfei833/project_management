@@ -1,0 +1,14 @@
+{# 付款闭环待办条目；items 为 PayTodo 列表 #}
+{% set kind_labels = {"payment": "待打款", "receipt": "待补回单", "income": "待确认到账"} %}
+{% for item in items %}
+  <div class="list-group-item d-flex justify-content-between align-items-start gap-2 py-2">
+    <div class="flex-grow-1">
+      <div class="d-flex align-items-center flex-wrap gap-2">
+        <span class="badge text-bg-info">{{ kind_labels.get(item.kind, item.kind) }}</span>
+        <a class="fw-semibold text-decoration-none" href="{{ item.url }}">{{ item.project_name }}</a>
+      </div>
+      <div class="small mt-1">¥ {{ item.amount_cents|money }} · {{ item.requester }} 发起</div>
+    </div>
+    <a class="btn btn-sm btn-outline-primary flex-shrink-0" href="{{ item.url }}">去处理</a>
+  </div>
+{% endfor %}
