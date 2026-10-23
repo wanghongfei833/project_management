@@ -34,7 +34,7 @@
               <td class="small">{{ item.requester }}</td>
               <td class="small text-muted">{{ tx.created_at|dt }}</td>
               <td>
-                <form method="post" action="{{ url_for('main.finance_pay', transaction_id=tx.id) }}" class="d-flex gap-1 flex-wrap align-items-center">
+                <form method="post" action="{{ url_for('main.finance_pay', transaction_id=tx.id) }}" class="d-flex gap-2 flex-wrap align-items-center">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input class="form-control form-control-sm" style="width:110px;" name="paid_amount_yuan"
                          value="{{ '%.2f'|format((tx.amount_cents or 0)/100) }}" title="实付金额（元）">
@@ -42,13 +42,13 @@
                           style="width:136px; min-width:136px;" name="payment_method">
                     {% for m in pay_methods %}<option>{{ m }}</option>{% endfor %}
                   </select>
-                  <button class="btn btn-sm btn-success" type="submit"
+                  <button class="btn btn-sm btn-success ms-auto text-nowrap flex-shrink-0" type="submit"
                           onclick="return confirm('确认打款？打款后进入「待补回单」。');">打款</button>
                 </form>
-                <form method="post" action="{{ url_for('main.finance_reject', transaction_id=tx.id) }}" class="d-flex gap-1 mt-1">
+                <form method="post" action="{{ url_for('main.finance_reject', transaction_id=tx.id) }}" class="d-flex gap-2 mt-1 align-items-center">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <input class="form-control form-control-sm" name="reason" placeholder="驳回原因（可选）">
-                  <button class="btn btn-sm btn-outline-danger" type="submit"
+                  <input class="form-control form-control-sm" style="min-width:0;" name="reason" placeholder="驳回原因（可选）">
+                  <button class="btn btn-sm btn-outline-danger text-nowrap flex-shrink-0" style="min-width:64px;" type="submit"
                           onclick="return confirm('确认驳回这笔付款申请？');">驳回</button>
                 </form>
               </td>
