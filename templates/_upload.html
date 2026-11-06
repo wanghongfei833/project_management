@@ -7,7 +7,7 @@
       <div class="upload-icon">📎</div>
       <div class="upload-title">点击选择文件，或把文件拖到这里</div>
       <div class="upload-sub">
-        也可以直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴截图 · 支持多选 · 单个文件 ≤ 25MB
+        截图可点“粘贴剪贴板”；复制的本地文件请直接 <kbd>Ctrl</kbd>+<kbd>V</kbd> · 支持多选 · 单个文件 ≤ 25MB
         {%- if extra_hint %}<br>{{ extra_hint }}{% endif %}
       </div>
     </div>
@@ -131,12 +131,32 @@
       sync();
       render();
     }
+    function extensionForType(type) {
+      var map = {
+        "application/pdf": "pdf",
+        "application/zip": "zip",
+        "application/x-zip-compressed": "zip",
+        "application/msword": "doc",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+        "application/vnd.ms-excel": "xls",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+        "application/vnd.ms-powerpoint": "ppt",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+        "text/plain": "txt",
+        "text/csv": "csv",
+        "text/markdown": "md"
+      };
+      return map[type] || (type.indexOf("image/") === 0
+        ? type.split("/")[1].split("+")[0].replace("jpeg", "jpg")
+        : "bin");
+    }
+
     function pastedFile(blob, index, suffix) {
       var type = blob.type || "image/png";
-      var ext = type.split("/")[1].split("+")[0].replace("jpeg", "jpg");
+      var ext = extensionForType(type);
       return new File(
         [blob],
-        "粘贴图片-" + Date.now() + "-" + index + "-" + suffix + "." + ext,
+        "粘贴文件-" + Date.now() + "-" + index + "-" + suffix + "." + ext,
         {type: type}
       );
     }
@@ -172,25 +192,41 @@
       }
     }
 
-    async function imagesFromClipboardItem(item, index) {
+    async function filesFromClipboardItem(item, index) {
       var types = item.types || [];
       var files = [];
       for (var i = 0; i < types.length; i++) {
-        if (types[i].indexOf("image/") !== 0) continue;
-        var blob = await item.getType(types[i]);
-        files.push(pastedFile(blob, index, String(i)));
+        if (
+          types[i].indexOf("image/") !== 0
+          && types[i].indexOf("application/") !== 0
+        ) continue;
+        try {
+          var blob = await item.getType(types[i]);
+          if (!blob || !blob.size) continue;
+          files.push(pastedFile(blob, index, String(i)));
+        } catch (err) {
+          continue;
+        }
       }
       if (files.length) return files;
       if (types.indexOf("text/html") >= 0) {
-        var htmlBlob = await item.getType("text/html");
-        files = await imagesFromHtml(await htmlBlob.text(), index);
+        try {
+          var htmlBlob = await item.getType("text/html");
+          files = await imagesFromHtml(await htmlBlob.text(), index);
+        } catch (err) {
+          files = [];
+        }
       }
       if (!files.length && types.indexOf("text/plain") >= 0) {
-        var textBlob = await item.getType("text/plain");
-        var text = (await textBlob.text()).trim();
-        if (/^data:image\//i.test(text) || /^https?:\/\/.+\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(text)) {
-          var file = await imageFromSource(text, index, "url");
-          if (file) files.push(file);
+        try {
+          var textBlob = await item.getType("text/plain");
+          var text = (await textBlob.text()).trim();
+          if (/^data:image\//i.test(text) || /^https?:\/\/.+\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(text)) {
+            var file = await imageFromSource(text, index, "url");
+            if (file) files.push(file);
+          }
+        } catch (err) {
+          // Ignore unsupported plain-text clipboard variants.
         }
       }
       return files;
@@ -232,18 +268,18 @@
         var typesSeen = [];
         for (var i = 0; i < clipboardItems.length; i++) {
           typesSeen = typesSeen.concat(clipboardItems[i].types || []);
-          pasted = pasted.concat(await imagesFromClipboardItem(clipboardItems[i], i));
+          pasted = pasted.concat(await filesFromClipboardItem(clipboardItems[i], i));
         }
         if (!pasted.length) {
           setPasteStatus(
-            "没有读到图片" + (typesSeen.length ? "（剪贴板格式：" + typesSeen.join("、") + "）" : "") +
-            "。已开启粘贴模式，请直接按 Ctrl+V。",
+            "没有直接读到文件" + (typesSeen.length ? "（剪贴板格式：" + typesSeen.join("、") + "）" : "") +
+            "。如果复制的是文件，请直接按 Ctrl+V；浏览器出于安全限制通常不允许按钮直接读取文件剪贴板。",
             "error"
           );
           return;
         }
         addFiles(pasted);
-        setPasteStatus("已从剪贴板加入 " + pasted.length + " 张图片。", "success");
+        setPasteStatus("已从剪贴板加入 " + pasted.length + " 个文件。", "success");
       } catch (err) {
         setPasteStatus("浏览器没有允许读取剪贴板。已开启粘贴模式，请直接按 Ctrl+V。", "error");
       }
@@ -286,16 +322,20 @@
       var types = Array.prototype.slice.call(cb.types || []);
       var hasImage = types.some(function (type) { return type.indexOf("image/") === 0; });
       var hasHtml = types.indexOf("text/html") >= 0;
-      if (!hasImage && !hasHtml) return;
+      var items = Array.prototype.slice.call(cb.items || []);
+      var hasFile = (cb.files && cb.files.length > 0) || items.some(function (item) {
+        return item.kind === "file" && !!item.type;
+      });
+      if (!hasImage && !hasHtml && !hasFile) return;
       e.preventDefault();
       activate();
       setPasteStatus("正在读取粘贴内容…", "muted");
       var files = await filesFromPasteData(cb);
       if (files.length) {
         addFiles(files);
-        setPasteStatus("已粘贴 " + files.length + " 张图片。", "success");
+        setPasteStatus("已粘贴 " + files.length + " 个文件。", "success");
       } else {
-        setPasteStatus("粘贴内容中没有可识别的图片。", "error");
+        setPasteStatus("粘贴内容中没有可识别的文件。", "error");
       }
     });
     preview.addEventListener("click", function (e) {
