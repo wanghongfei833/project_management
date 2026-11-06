@@ -685,6 +685,38 @@ class FundTransferAttachment(db.Model):
     uploaded_by = db.relationship("User", foreign_keys=[uploaded_by_user_id])
 
 
+class ProjectLink(db.Model):
+    """仅内置 admin 可见的项目关联；子项目侧不知道父项目存在。"""
+
+    __tablename__ = "project_links"
+
+    id = db.Column(db.Integer, primary_key=True)
+    parent_project_id = db.Column(
+        db.Integer,
+        db.ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    child_project_id = db.Column(
+        db.Integer,
+        db.ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status = db.Column(db.String(16), nullable=False, default="active", index=True)
+    start_date = db.Column(db.Date, nullable=False, default=date.today)
+    end_date = db.Column(db.Date, nullable=True)
+    created_by_user_id = db.Column(
+        db.Integer, db.ForeignKey("users.id"), nullable=True
+    )
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    ended_at = db.Column(db.DateTime, nullable=True)
+
+    parent_project = db.relationship("Project", foreign_keys=[parent_project_id])
+    child_project = db.relationship("Project", foreign_keys=[child_project_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
+
+
 class ProjectSubcontractSettlement(db.Model):
     """主项目向分包项目付款的内部结算，两侧账目严格隔离。"""
 

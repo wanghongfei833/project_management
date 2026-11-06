@@ -15,16 +15,30 @@ def projects_list():
 @login_required
 def projects_new():
     form = ProjectForm()
+    attach_child_id = request.values.get("attach_child_id", type=int)
+    attach_child = (
+        db.session.get(Project, int(attach_child_id)) if attach_child_id else None
+    )
+    if attach_child_id and not is_super_admin():
+        flash("只有内置 admin 可以为已有项目新建父项目", "danger")
+        return redirect(url_for("main.dashboard"))
+    if attach_child_id and attach_child is None:
+        flash("待关联的已有项目不存在", "warning")
+        return redirect(url_for("main.project_links_admin"))
+    if attach_child is not None and active_parent_link(attach_child.id):
+        flash("该已有项目已经存在生效中的父项目关联", "warning")
+        return redirect(url_for("main.project_links_admin"))
     users = User.query.filter_by(is_active=True).order_by(User.username.asc()).all()
     form.member_user_ids.choices = [(u.id, u.username) for u in users]
     form.leader_user_id.choices = [(u.id, u.username) for u in users]
-    # 只能把项目挂载到自己有明确成员权限的上级项目，父子关系不越权。
-    parent_candidates = (
-        _accessible_projects_query()
-        .filter(Project.status != "ended")
-        .order_by(Project.name.asc())
-        .all()
-    )
+    # 常规创建时只有内置 admin 能直接选择父项目。
+    parent_candidates = []
+    if is_super_admin() and attach_child is None:
+        parent_candidates = (
+            Project.query.filter(Project.status != "ended")
+            .order_by(Project.name.asc())
+            .all()
+        )
     form.parent_project_id.choices = [(0, "（无——独立项目）")] + [(p.id, p.name) for p in parent_candidates]
     # 构建父项目成员映射（用于前端JS分行显示）
     parent_members_map = {
@@ -74,10 +88,15 @@ def projects_new():
             flash("「中介从客户款中扣除」且按比例时，中介比例须小于 100%。", "warning")
             return render_template("project_form.html", form=form, is_admin=is_admin(), parent_candidates=parent_candidates, admin_user_ids=admin_user_ids, parent_member_ids=parent_member_ids)
 
-        parent_id = form.parent_project_id.data
+        parent_id = (
+            form.parent_project_id.data
+            if is_super_admin() and attach_child is None
+            else 0
+        )
         if parent_id == 0:
             parent_id = None
-        can_div = form.can_dividend.data == 1 if parent_id else True
+        linked = bool(parent_id or attach_child)
+        can_div = form.can_dividend.data == 1 if linked else True
         p = Project(
             name=name,
             leader_user_id=int(form.leader_user_id.data),
@@ -90,7 +109,7 @@ def projects_new():
             broker_fixed_fee_cents=int(fixed_cents),
             status="open",
             note=form.note.data or None,
-            parent_project_id=parent_id,
+            parent_project_id=None,
             can_dividend=can_div,
         )
         # 表单可选「已结束」；统一走 open/ended 两种状态并维护 ended_at
@@ -105,6 +124,22 @@ def projects_new():
         for uid in member_ids:
             db.session.add(ProjectMember(project_id=p.id, user_id=int(uid)))
         ensure_project_fund_pool(p)
+        if parent_id:
+            link = attach_project_link(int(parent_id), int(p.id))
+            _log_project_activity(
+                int(parent_id),
+                "project_link.attach",
+                f"隐藏关联新项目：{p.name}",
+                detail=f"link_id={link.id};child_project_id={p.id}",
+            )
+        elif attach_child is not None:
+            link = attach_project_link(int(p.id), int(attach_child.id))
+            _log_project_activity(
+                int(p.id),
+                "project_link.attach",
+                f"隐藏关联已有项目：{attach_child.name}",
+                detail=f"link_id={link.id};child_project_id={attach_child.id}",
+            )
 
         _log_project_activity(
             int(p.id),
@@ -113,7 +148,7 @@ def projects_new():
         )
         db.session.commit()
         flash("项目已创建", "success")
-        return redirect(url_for("main.projects_list"))
+        return redirect(url_for("main.project_detail", project_id=p.id))
 
     # default
     if request.method == "GET":
@@ -255,8 +290,8 @@ def projects_edit(project_id: int):
         p.broker_fixed_fee_cents = int(fixed_cents)
         _apply_project_status(p, form.status.data)
         p.note = form.note.data or None
-        parent_id = form.parent_project_id.data
-        p.parent_project_id = parent_id if parent_id and parent_id != 0 else None
+        # 项目编辑不再修改父子关系，统一由内置 admin 的隐藏关联页面管理。
+        p.parent_project_id = None
         p.can_dividend = form.can_dividend.data == 1
 
         new_member_ids = set(form.member_user_ids.data or [])
@@ -496,8 +531,9 @@ def project_detail(project_id: int):
         flash("你不是该项目成员，无权查看。", "danger")
         return redirect(url_for("main.projects_list"))
 
-    # 父子关系不授予数据权限，也不自动聚合父子流水。
-    is_parent = bool(p.sub_projects)
+    # 隐藏关联只影响管理员可见的应收汇总，不授予账目访问权。
+    link_summary = project_link_summary(int(p.id))
+    is_parent = bool(link_summary.children)
     query_pid_filter = Transaction.project_id == p.id
     fund_project_ids = {int(p.id)}
     ensure_project_fund_pool(p, commit=True)
@@ -584,23 +620,6 @@ def project_detail(project_id: int):
         .order_by(User.username.asc())
         .all()
     )
-    subcontract_summary = parent_contract_summary(int(p.id))
-    subcontract_form = SubcontractPaymentForm()
-    subcontract_form.child_project_id.choices = [
-        (int(row.child.id), row.child.name) for row in subcontract_summary.children
-    ]
-    subcontract_settlements = (
-        ProjectSubcontractSettlement.query.filter_by(
-            parent_project_id=int(p.id)
-        )
-        .order_by(
-            ProjectSubcontractSettlement.created_at.desc(),
-            ProjectSubcontractSettlement.id.desc(),
-        )
-        .limit(50)
-        .all()
-    )
-    child_contract_info = child_receivable_summary(int(p.id))
     fund_pool_form = FundPoolSettingsForm()
     fund_pool_form.custodian_user_id.choices = [
         (int(u.id), u.username) for u in members
@@ -697,7 +716,7 @@ def project_detail(project_id: int):
         .scalar()
         or 0
     )
-    expected_total_cents = int(project_expected_total_cents(p.id))
+    expected_total_cents = int(link_summary.total_receivable_cents)
     finance = build_project_finance(
         p,
         expected_total_cents=expected_total_cents,
@@ -814,7 +833,7 @@ def project_detail(project_id: int):
 
     child_visible_ids = {
         int(row.child.id)
-        for row in subcontract_summary.children
+        for row in link_summary.children
         if is_admin() or _is_project_member(int(row.child.id), int(current_user.id))
     }
 
@@ -897,10 +916,7 @@ def project_detail(project_id: int):
         fund_pool_form=fund_pool_form,
         fund_transfer_form=fund_transfer_form,
         fund_transfers=fund_transfers,
-        subcontract_summary=subcontract_summary,
-        subcontract_form=subcontract_form,
-        subcontract_settlements=subcontract_settlements,
-        child_contract_info=child_contract_info,
+        link_summary=link_summary,
         public_balance_cents=int(fund_balances.public_cents),
         pool_balance_cents=int(fund_balances.pool_cents),
         available_fund_cents=int(fund_balances.total_cents),

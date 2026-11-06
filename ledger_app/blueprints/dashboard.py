@@ -67,7 +67,9 @@ def dashboard():
             .scalar()
         )
         received_gross = int(received_gross or 0)
-        expected_total_cents = int(project_expected_total_cents(p.id))
+        expected_total_cents = int(
+            project_link_summary(int(p.id)).total_receivable_cents
+        )
         fin = build_project_finance(
             p,
             expected_total_cents=expected_total_cents,

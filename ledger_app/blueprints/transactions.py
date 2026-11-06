@@ -177,9 +177,6 @@ def transactions_edit(transaction_id: int):
     if not tx or tx.is_void:
         flash("流水不存在", "warning")
         return redirect(url_for("main.transactions_list"))
-    if settlement_for_transaction(int(tx.id)):
-        flash("内部结算流水不能在普通流水里修改，请通过分包结算流程处理", "warning")
-        return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     p = db.session.get(Project, int(tx.project_id))
     if not _check_project_not_ended(p):
@@ -310,9 +307,6 @@ def transactions_edit_approve(transaction_id: int):
     if not tx or tx.is_void or not tx.project_id:
         flash("流水不存在", "warning")
         return redirect(url_for("main.transactions_list"))
-    if settlement_for_transaction(int(tx.id)):
-        flash("内部结算流水不能直接删除，请通过分包结算流程处理", "warning")
-        return redirect(url_for("main.project_detail", project_id=tx.project_id))
 
     if not is_admin() and not _is_project_leader(current_user.id, int(tx.project_id)):
         flash("只有项目负责人或管理员可以同意修改", "danger")
@@ -451,9 +445,6 @@ def transactions_delete_request(transaction_id: int):
     if not tx or tx.is_void or not tx.project_id:
         flash("流水不存在", "warning")
         return redirect(url_for("main.transactions_list"))
-    if settlement_for_transaction(int(tx.id)):
-        flash("内部结算流水不能直接删除，请通过分包结算流程处理", "warning")
-        return redirect(url_for("main.project_detail", project_id=tx.project_id))
     if getattr(tx, "status", "active") != "active":
         flash("该流水尚未审核生效，无法删除。", "warning")
         return redirect(url_for("main.project_detail", project_id=tx.project_id))

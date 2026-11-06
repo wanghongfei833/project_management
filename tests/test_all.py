@@ -32,12 +32,12 @@ from ledger_app.models import (
     ProjectDeleteRequest, ProjectDeleteApproval, ProjectActivityLog, Attachment,
     ProjectLogRule, ProjectUpdate,
     FundAccount, FundTransfer, ProjectFundPool,
-    ProjectSubcontractSettlement,
+    ProjectLink,
     SmsNotification, SmsNotificationProject,
 )
 from ledger_app.project_finance import build_project_finance
 from ledger_app.services.fund_pool import ensure_project_fund_pool, project_fund_balances
-from ledger_app.services.subcontracts import parent_contract_summary
+from ledger_app.services.subcontracts import project_link_summary
 from ledger_app.log_rules import (
     build_log_reminder_plans,
     local_day_utc_bounds,
@@ -117,7 +117,7 @@ def _seed_test_data():
     pA1 = Project(name="ProjA1", expected_income_cents=5000000,
                   broker_fee_mode="percent", broker_fee_direction="we_pay_separate",
                   referral_ratio=Decimal("0"), status="open",
-                  parent_project_id=pA.id, can_dividend=False,
+                  can_dividend=False,
                   leader_user_id=users["hu"].id,
                   planned_start_date=date(2026,3,1), planned_end_date=date(2026,9,30))
     _db.session.add(pA1)
@@ -128,13 +128,27 @@ def _seed_test_data():
     pA2 = Project(name="ProjA2", expected_income_cents=5000000,
                   broker_fee_mode="percent", broker_fee_direction="we_pay_separate",
                   referral_ratio=Decimal("0"), status="open",
-                  parent_project_id=pA.id, can_dividend=True,
+                  can_dividend=True,
                   leader_user_id=users["zhuo"].id,
                   planned_start_date=date(2026,4,1), planned_end_date=date(2026,10,31))
     _db.session.add(pA2)
     _db.session.flush()
     for u in ["zhuo", "wai2"]:
         _db.session.add(ProjectMember(project_id=pA2.id, user_id=users[u].id))
+    _db.session.add_all([
+        ProjectLink(
+            parent_project_id=pA.id,
+            child_project_id=pA1.id,
+            status="active",
+            start_date=date(2026, 1, 1),
+        ),
+        ProjectLink(
+            parent_project_id=pA.id,
+            child_project_id=pA2.id,
+            status="active",
+            start_date=date(2026, 1, 1),
+        ),
+    ])
 
     pB = Project(name="ProjB", expected_income_cents=3000000,
                  broker_fee_mode="percent", broker_fee_direction="we_pay_separate",
@@ -303,7 +317,6 @@ class TestStrictSubcontractArchitecture:
             broker_fee_direction="we_pay_separate",
             referral_ratio=Decimal("0"),
             status="open",
-            parent_project_id=parent.id,
             leader_user_id=seed["users"]["hu"],
             planned_start_date=date(2026, 1, 1),
             planned_end_date=date(2026, 12, 31),
@@ -325,6 +338,16 @@ class TestStrictSubcontractArchitecture:
 
     def test_contract_amount_is_dynamic_and_child_ledger_is_isolated(self, client):
         parent, child = self._projects("dynamic")
+        login(client, "admin", "admin123!")
+        client.post(
+            "/admin/project-links/attach",
+            data={
+                "parent_project_id": parent.id,
+                "child_project_id": child.id,
+                "start_date": date.today().isoformat(),
+            },
+            follow_redirects=True,
+        )
         _db.session.add(
             Transaction(
                 project_id=child.id,
@@ -341,15 +364,17 @@ class TestStrictSubcontractArchitecture:
         )
         _db.session.commit()
 
-        summary = parent_contract_summary(parent.id)
-        assert summary.contract_cents == 3_000_000
-        assert summary.gross_margin_cents == 2_000_000
+        summary = project_link_summary(parent.id)
+        assert summary.base_receivable_cents == 5_000_000
+        assert summary.linked_receivable_cents == 3_000_000
+        assert summary.total_receivable_cents == 8_000_000
         assert Transaction.query.filter_by(project_id=parent.id).count() == 0
 
+        client.post("/logout")
         login(client, "wang")
         parent_html = client.get(f"/projects/{parent.id}").get_data(as_text=True)
         assert "CHILD_ONLY_SECRET" not in parent_html
-        assert "30,000.00" in parent_html
+        assert "80,000.00" in parent_html
         child_response = client.get(
             f"/projects/{child.id}", follow_redirects=False
         )
@@ -357,66 +382,52 @@ class TestStrictSubcontractArchitecture:
 
         child.expected_income_cents = 2_000_000
         _db.session.commit()
-        updated = parent_contract_summary(parent.id)
-        assert updated.contract_cents == 2_000_000
-        assert updated.gross_margin_cents == 3_000_000
+        updated = project_link_summary(parent.id)
+        assert updated.linked_receivable_cents == 2_000_000
+        assert updated.total_receivable_cents == 7_000_000
         assert Transaction.query.filter_by(project_id=parent.id).count() == 0
 
-    def test_internal_payment_creates_isolated_income_after_finance_pay(self, client):
-        parent, child = self._projects("settlement")
+    def test_only_builtin_admin_can_hide_link_and_child_cannot_see_parent(self, client):
+        parent, child = self._projects("hidden-link")
         seed = get_seed()
-        _db.session.add(
-            Transaction(
-                project_id=parent.id,
-                status="active",
-                type="income",
-                amount_cents=5_000_000,
-                occur_date=date.today(),
-                settled=True,
-                fund_account=FundAccount.PUBLIC.value,
-                counterparty="业主[甲方]",
-                created_by_user_id=seed["users"]["admin"],
-            )
-        )
+        other_admin = User(username="linkadmin", role="admin", is_active=True)
+        other_admin.set_password("123456!")
+        _db.session.add(other_admin)
         _db.session.commit()
 
-        login(client, "wang")
+        login(client, "linkadmin")
         rv = client.post(
-            f"/projects/{parent.id}/subcontracts/pay",
+            "/admin/project-links/attach",
             data={
+                "parent_project_id": parent.id,
                 "child_project_id": child.id,
-                "amount_yuan": "30000.00",
-                "fund_account": FundAccount.PUBLIC.value,
-                "note": "首笔分包款",
+                "start_date": date.today().isoformat(),
             },
             follow_redirects=True,
         )
         assert rv.status_code == 200
-        parent_tx = (
-            Transaction.query.filter_by(project_id=parent.id, type="expense")
-            .order_by(Transaction.id.desc())
-            .first()
-        )
-        settlement = ProjectSubcontractSettlement.query.filter_by(
+        assert ProjectLink.query.filter_by(
             parent_project_id=parent.id, child_project_id=child.id
-        ).one()
-        assert parent_tx.settled is False
-        assert settlement.status == "pending_payment"
-        assert Transaction.query.filter_by(project_id=child.id).count() == 0
+        ).first() is None
 
+        client.post("/logout")
+        login(client, "admin", "admin123!")
         client.post(
-            f"/finance/payments/{parent_tx.id}/pay",
+            "/admin/project-links/attach",
             data={
-                "paid_amount_yuan": "30000.00",
-                "payment_method": "银行转账",
+                "parent_project_id": parent.id,
+                "child_project_id": child.id,
+                "start_date": date.today().isoformat(),
             },
             follow_redirects=True,
         )
-        _db.session.refresh(settlement)
-        assert settlement.status == "pending_receipt"
-        child_income = Transaction.query.filter_by(project_id=child.id).one()
-        assert child_income.settled is False
-        assert child_income.counterparty == f"分包款[{parent.name}]"
+        link = ProjectLink.query.filter_by(
+            parent_project_id=parent.id, child_project_id=child.id
+        ).one()
+        assert link.status == "active"
+        assert child.parent_project_id is None
+        assert Transaction.query.filter_by(project_id=child.id).count() == 0
+        assert Transaction.query.filter_by(project_id=parent.id).count() == 0
 
         client.post("/logout")
         login(client, "hu")
@@ -425,28 +436,75 @@ class TestStrictSubcontractArchitecture:
             302,
             303,
         )
-        client.post(
-            f"/finance/income/{child_income.id}/confirm",
-            follow_redirects=True,
-        )
-        _db.session.refresh(settlement)
-        _db.session.refresh(child_income)
-        assert settlement.status == "closed"
-        assert child_income.settled is True
+        child_html = client.get(f"/projects/{child.id}").get_data(as_text=True)
+        assert parent.name not in child_html
+        assert "父项目" not in child_html
 
-        parent_balances = project_fund_balances([parent.id])
-        child_balances = project_fund_balances([child.id])
-        assert parent_balances.public_cents == 2_000_000
-        assert child_balances.public_cents == 3_000_000
+        client.post("/logout")
+        login(client, "admin", "admin123!")
+        client.post(f"/admin/project-links/{link.id}/end", follow_redirects=True)
+        _db.session.refresh(link)
+        assert link.status == "ended"
+        ended_summary = project_link_summary(parent.id)
+        assert ended_summary.linked_receivable_cents == 0
+        assert ended_summary.total_receivable_cents == 5_000_000
 
         child.expected_income_cents = 2_000_000
         _db.session.commit()
-        changed = parent_contract_summary(parent.id)
-        row = next(r for r in changed.children if r.child.id == child.id)
-        assert row.contract_cents == 2_000_000
-        assert row.paid_cents == 3_000_000
-        assert row.overpaid_cents == 1_000_000
-        assert parent_tx.amount_cents == 3_000_000
+        assert project_link_summary(parent.id).linked_receivable_cents == 0
+        _db.session.delete(other_admin)
+        _db.session.commit()
+
+    def test_admin_can_create_new_parent_for_existing_child(self, client):
+        seed = get_seed()
+        child = Project(
+            name="ExistingChildForNewParent",
+            expected_income_cents=5_000_000,
+            broker_fee_mode="percent",
+            broker_fee_direction="we_pay_separate",
+            referral_ratio=Decimal("0"),
+            status="open",
+            leader_user_id=seed["users"]["hu"],
+            planned_start_date=date(2026, 1, 1),
+            planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(child)
+        _db.session.flush()
+        _db.session.add(
+            ProjectMember(project_id=child.id, user_id=seed["users"]["hu"])
+        )
+        _db.session.commit()
+
+        login(client, "admin", "admin123!")
+        rv = client.post(
+            f"/projects/new?attach_child_id={child.id}",
+            data={
+                "name": "NewParentForExistingChild",
+                "leader_user_id": seed["users"]["admin"],
+                "planned_start_date": "2026-01-01",
+                "planned_end_date": "2026-12-31",
+                "expected_income_yuan": "30000.00",
+                "broker_fee_mode": "percent",
+                "broker_fee_direction": "we_pay_separate",
+                "referral_ratio_percent": "0",
+                "broker_fixed_fee_yuan": "0",
+                "status": "open",
+                "member_user_ids": [seed["users"]["admin"]],
+                "can_dividend": 1,
+            },
+            follow_redirects=True,
+        )
+        assert rv.status_code == 200
+        parent = Project.query.filter_by(name="NewParentForExistingChild").one()
+        link = ProjectLink.query.filter_by(
+            parent_project_id=parent.id, child_project_id=child.id
+        ).one()
+        assert link.status == "active"
+        assert child.parent_project_id is None
+        summary = project_link_summary(parent.id)
+        assert summary.base_receivable_cents == 3_000_000
+        assert summary.linked_receivable_cents == 5_000_000
+        assert summary.total_receivable_cents == 8_000_000
 
 
 class TestTransactions:

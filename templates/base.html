@@ -174,6 +174,9 @@
               <li class="nav-item"><a class="nav-link {% if request.endpoint=='main.finance_page' %}active{% endif %}" href="{{ url_for('main.finance_page') }}">财务{% if pay_todo_count %}<span class="badge rounded-pill text-bg-info ms-1">{{ pay_todo_count }}</span>{% endif %}</a></li>
             {% endif %}
             {% if is_admin %}
+              {% if is_super_admin %}
+                <li class="nav-item"><a class="nav-link {% if request.endpoint=='main.project_links_admin' %}active{% endif %}" href="{{ url_for('main.project_links_admin') }}">关联</a></li>
+              {% endif %}
               <li class="nav-item"><a class="nav-link {% if request.endpoint=='main.sms_list' %}active{% endif %}" href="{{ url_for('main.sms_list') }}">短信</a></li>
               <li class="nav-item"><a class="nav-link {% if request.endpoint in ['main.users_list','main.users_new','main.users_edit'] %}active{% endif %}" href="{{ url_for('main.users_list') }}">用户</a></li>
             {% endif %}

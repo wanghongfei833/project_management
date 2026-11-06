@@ -1137,12 +1137,82 @@ def _migration_0005_subcontract_settlements() -> None:
     db.session.commit()
 
 
+def _migration_0006_hidden_project_links() -> None:
+    """把可见的 parent_project_id 关系迁移成仅 admin 可见的关联表。"""
+    if not _table_exists("project_links"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE project_links (
+                  id INTEGER PRIMARY KEY,
+                  parent_project_id INTEGER NOT NULL,
+                  child_project_id INTEGER NOT NULL,
+                  status VARCHAR(16) NOT NULL DEFAULT 'active',
+                  start_date DATE NOT NULL,
+                  end_date DATE,
+                  created_by_user_id INTEGER,
+                  created_at DATETIME NOT NULL,
+                  ended_at DATETIME,
+                  FOREIGN KEY(parent_project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                  FOREIGN KEY(child_project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                  FOREIGN KEY(created_by_user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_project_links_parent_project_id "
+                "ON project_links (parent_project_id)"
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_project_links_child_project_id "
+                "ON project_links (child_project_id)"
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_project_links_status ON project_links (status)"
+            )
+        )
+
+    if _table_exists("projects") and _table_exists("project_links"):
+        db.session.execute(
+            text(
+                """
+                INSERT INTO project_links
+                  (parent_project_id, child_project_id, status, start_date,
+                   created_at)
+                SELECT p.parent_project_id, p.id, 'active', CURRENT_DATE,
+                       CURRENT_TIMESTAMP
+                FROM projects p
+                WHERE p.parent_project_id IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM project_links pl
+                    WHERE pl.child_project_id = p.id AND pl.status = 'active'
+                  )
+                """
+            )
+        )
+        # 子项目页面和后续代码不再依赖 parent_project_id，避免泄露父项目。
+        db.session.execute(
+            text(
+                "UPDATE projects SET parent_project_id = NULL "
+                "WHERE parent_project_id IS NOT NULL"
+            )
+        )
+    db.session.commit()
+
+
 MIGRATIONS: list[tuple[str, str, Callable[[], None]]] = [
     ("0001", "历史建表/补列汇总（v0 → 2026-10 的全部列与表）", _migration_0001_historical_catchup),
     ("0002", "付款闭环：users.is_finance + transactions 付款/回单字段", _migration_0002_payment_workflow),
     ("0003", "资金账户：交易收支账户 + 项目资金池与内部划转", _migration_0003_fund_pool),
     ("0004", "历史已结算支出补齐付款闭环状态", _migration_0004_close_legacy_expenses),
     ("0005", "父子项目严格隔离的内部分包结算", _migration_0005_subcontract_settlements),
+    ("0006", "隐藏项目关联并迁移旧父子关系", _migration_0006_hidden_project_links),
 ]
 
 

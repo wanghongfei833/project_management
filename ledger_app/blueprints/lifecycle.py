@@ -441,13 +441,20 @@ def projects_delete_request(project_id: int):
     if not _check_project_not_ended(p):
         return redirect(url_for("main.project_detail", project_id=project_id))
 
-    # 禁止删除有未终止子项目的父项目
-    if p.sub_projects:
-        active_subs = [sub for sub in p.sub_projects if sub.status != "ended"]
-        if active_subs:
-            names = "、".join(sub.name for sub in active_subs)
-            flash(f"该项目有未终止的子项目（{names}），请先终止所有子项目后再删除父项目", "warning")
-            return redirect(url_for("main.project_detail", project_id=project_id))
+    if active_parent_link(int(p.id)) is not None:
+        flash("该项目存在生效中的隐藏父关联，请先由内置 admin 结束关联后再删除", "warning")
+        return redirect(url_for("main.project_detail", project_id=project_id))
+
+    # 禁止删除仍有生效隐藏关联子项目的父项目
+    active_subs = [
+        link.child_project
+        for link in active_child_links(int(p.id))
+        if link.child_project and link.child_project.status != "ended"
+    ]
+    if active_subs:
+        names = "、".join(sub.name for sub in active_subs)
+        flash(f"该项目有未终止的子项目（{names}），请先终止所有子项目后再删除父项目", "warning")
+        return redirect(url_for("main.project_detail", project_id=project_id))
 
     existing = ProjectDeleteRequest.query.filter_by(project_id=p.id, status="open").first()
     if existing:
@@ -618,13 +625,6 @@ def _do_delete_project(p: Project) -> None:
 
     db.session.query(ProjectDividendDistribution).filter(
         ProjectDividendDistribution.project_id == pid
-    ).delete(synchronize_session=False)
-
-    db.session.query(ProjectSubcontractSettlement).filter(
-        db.or_(
-            ProjectSubcontractSettlement.parent_project_id == pid,
-            ProjectSubcontractSettlement.child_project_id == pid,
-        )
     ).delete(synchronize_session=False)
 
     for transfer in FundTransfer.query.filter_by(project_id=pid).all():

@@ -1,198 +1,159 @@
-"""主合同项目与分包项目之间的动态合同承诺和内部结算。"""
+"""管理员专属的隐藏项目关联与动态应收汇总。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
-from sqlalchemy import or_
+from flask_login import current_user
 
 from ..extensions import db
 from ..models import (
     Project,
-    ProjectSubcontractSettlement,
-    Transaction,
+    ProjectExpectedIncomeAdjustment,
+    ProjectLink,
 )
 
-ACTIVE_SETTLEMENT_STATUSES = ("pending_payment", "pending_receipt", "closed")
-
 
 @dataclass(frozen=True)
-class ChildContractSummary:
+class LinkedProjectRow:
+    link: ProjectLink
     child: Project
-    contract_cents: int
-    paid_cents: int
-    pending_payment_cents: int
-    unpaid_commitment_cents: int
-    overpaid_cents: int
-    available_to_pay_cents: int
+    current_receivable_cents: int
 
 
 @dataclass(frozen=True)
-class ParentContractSummary:
-    children: list[ChildContractSummary]
-    contract_cents: int
-    paid_cents: int
-    pending_payment_cents: int
-    overpaid_cents: int
-    available_to_pay_cents: int
-    gross_margin_cents: int
+class ProjectLinkSummary:
+    project: Project | None
+    base_receivable_cents: int
+    linked_receivable_cents: int
+    total_receivable_cents: int
+    children: list[LinkedProjectRow]
 
 
-@dataclass(frozen=True)
-class ChildReceivableSummary:
-    parent_project: Project | None
-    contract_cents: int
-    received_cents: int
-    pending_receipt_cents: int
-    outstanding_cents: int
-
-
-def _settlement_amount(settlement: ProjectSubcontractSettlement) -> int:
-    return int(settlement.amount_cents or 0)
-
-
-def parent_contract_summary(parent_project_id: int) -> ParentContractSummary:
-    parent = db.session.get(Project, int(parent_project_id))
-    if parent is None:
-        return ParentContractSummary([], 0, 0, 0, 0, 0, 0)
-
-    children = (
-        Project.query.filter(Project.parent_project_id == int(parent.id))
-        .order_by(Project.name.asc())
-        .all()
-    )
-    settlements = ProjectSubcontractSettlement.query.filter(
-        ProjectSubcontractSettlement.parent_project_id == int(parent.id),
-        ProjectSubcontractSettlement.status.in_(ACTIVE_SETTLEMENT_STATUSES),
-    ).all()
-
-    by_child: dict[int, list[ProjectSubcontractSettlement]] = {}
-    for settlement in settlements:
-        by_child.setdefault(int(settlement.child_project_id), []).append(settlement)
-
-    rows: list[ChildContractSummary] = []
-    total_contract = 0
-    total_paid = 0
-    total_pending = 0
-    total_overpaid = 0
-    for child in children:
-        contract_cents = int(child.expected_income_cents or 0)
-        child_settlements = by_child.get(int(child.id), [])
-        paid_cents = sum(
-            _settlement_amount(s)
-            for s in child_settlements
-            if s.status in ("pending_receipt", "closed")
-        )
-        pending_payment_cents = sum(
-            _settlement_amount(s)
-            for s in child_settlements
-            if s.status == "pending_payment"
-        )
-        unpaid = max(contract_cents - paid_cents, 0)
-        overpaid = max(paid_cents - contract_cents, 0)
-        available = max(
-            contract_cents - paid_cents - pending_payment_cents, 0
-        )
-        rows.append(
-            ChildContractSummary(
-                child=child,
-                contract_cents=contract_cents,
-                paid_cents=paid_cents,
-                pending_payment_cents=pending_payment_cents,
-                unpaid_commitment_cents=unpaid,
-                overpaid_cents=overpaid,
-                available_to_pay_cents=available,
+def base_project_receivable_cents(project_id: int) -> int:
+    project = db.session.get(Project, int(project_id))
+    if project is None:
+        return 0
+    extra = int(
+        db.session.query(
+            db.func.coalesce(
+                db.func.sum(ProjectExpectedIncomeAdjustment.amount_cents), 0
             )
         )
-        total_contract += contract_cents
-        total_paid += paid_cents
-        total_pending += pending_payment_cents
-        total_overpaid += overpaid
-
-    own_contract = int(parent.expected_income_cents or 0)
-    return ParentContractSummary(
-        children=rows,
-        contract_cents=total_contract,
-        paid_cents=total_paid,
-        pending_payment_cents=total_pending,
-        overpaid_cents=total_overpaid,
-        available_to_pay_cents=max(total_contract - total_paid - total_pending, 0),
-        gross_margin_cents=own_contract - total_contract,
-    )
-
-
-def child_receivable_summary(child_project_id: int) -> ChildReceivableSummary:
-    child = db.session.get(Project, int(child_project_id))
-    if child is None or not child.parent_project_id:
-        return ChildReceivableSummary(None, 0, 0, 0, 0)
-
-    parent = db.session.get(Project, int(child.parent_project_id))
-    contract_cents = int(child.expected_income_cents or 0)
-    settlements = ProjectSubcontractSettlement.query.filter(
-        ProjectSubcontractSettlement.child_project_id == int(child.id),
-        ProjectSubcontractSettlement.status.in_(ACTIVE_SETTLEMENT_STATUSES),
-    ).all()
-    received_cents = sum(
-        _settlement_amount(s) for s in settlements if s.status == "closed"
-    )
-    pending_receipt_cents = sum(
-        _settlement_amount(s)
-        for s in settlements
-        if s.status == "pending_receipt"
-    )
-    return ChildReceivableSummary(
-        parent_project=parent,
-        contract_cents=contract_cents,
-        received_cents=received_cents,
-        pending_receipt_cents=pending_receipt_cents,
-        outstanding_cents=max(contract_cents - received_cents, 0),
-    )
-
-
-def settle_subcontract_amount(
-    settlement: ProjectSubcontractSettlement, paid_at
-) -> Transaction:
-    """主项目付款后，在分包项目侧生成待确认收入。"""
-    child = db.session.get(Project, int(settlement.child_project_id))
-    parent = db.session.get(Project, int(settlement.parent_project_id))
-    if child is None or parent is None:
-        raise ValueError("内部结算项目不存在")
-    tx = Transaction(
-        project_id=int(child.id),
-        status="active",
-        type="income",
-        amount_cents=int(settlement.amount_cents),
-        occur_date=settlement.parent_transaction.occur_date,
-        settled=False,
-        fund_account="public",
-        counterparty=f"分包款[{parent.name}]",
-        note=(
-            f"[SUBCONTRACT] 来自主合同项目「{parent.name}」的分包款"
-            + (f"；{settlement.note}" if settlement.note else "")
-        ),
-        created_by_user_id=settlement.created_by_user_id,
-    )
-    db.session.add(tx)
-    db.session.flush()
-    settlement.child_transaction_id = int(tx.id)
-    settlement.status = "pending_receipt"
-    settlement.paid_at = paid_at
-    return tx
-
-
-def mark_subcontract_received(settlement: ProjectSubcontractSettlement, received_at) -> None:
-    settlement.status = "closed"
-    settlement.received_at = received_at
-
-
-def settlement_for_transaction(
-    transaction_id: int,
-) -> ProjectSubcontractSettlement | None:
-    return ProjectSubcontractSettlement.query.filter(
-        or_(
-            ProjectSubcontractSettlement.parent_transaction_id == int(transaction_id),
-            ProjectSubcontractSettlement.child_transaction_id == int(transaction_id),
+        .filter(
+            ProjectExpectedIncomeAdjustment.project_id == int(project_id),
+            ProjectExpectedIncomeAdjustment.status.in_(["active", "executed"]),
         )
-    ).first()
+        .scalar()
+        or 0
+    )
+    return int(project.expected_income_cents or 0) + extra
+
+
+def active_child_links(parent_project_id: int) -> list[ProjectLink]:
+    return (
+        ProjectLink.query.filter_by(
+            parent_project_id=int(parent_project_id),
+            status="active",
+        )
+        .order_by(ProjectLink.id.asc())
+        .all()
+    )
+
+
+def active_parent_link(child_project_id: int) -> ProjectLink | None:
+    return (
+        ProjectLink.query.filter_by(
+            child_project_id=int(child_project_id),
+            status="active",
+        )
+        .order_by(ProjectLink.id.desc())
+        .first()
+    )
+
+
+def project_link_summary(project_id: int) -> ProjectLinkSummary:
+    project = db.session.get(Project, int(project_id))
+    if project is None:
+        return ProjectLinkSummary(None, 0, 0, 0, [])
+    base = base_project_receivable_cents(int(project.id))
+    children: list[LinkedProjectRow] = []
+    for link in active_child_links(int(project.id)):
+        child = db.session.get(Project, int(link.child_project_id))
+        if child is None:
+            continue
+        children.append(
+            LinkedProjectRow(
+                link=link,
+                child=child,
+                current_receivable_cents=base_project_receivable_cents(
+                    int(child.id)
+                ),
+            )
+        )
+    linked = sum(row.current_receivable_cents for row in children)
+    return ProjectLinkSummary(
+        project=project,
+        base_receivable_cents=base,
+        linked_receivable_cents=linked,
+        total_receivable_cents=base + linked,
+        children=children,
+    )
+
+
+def project_total_receivable_cents(project_id: int) -> int:
+    return project_link_summary(project_id).total_receivable_cents
+
+
+def would_create_link_cycle(parent_project_id: int, child_project_id: int) -> bool:
+    """沿父链向上检查，防止 A→B→A 等循环。"""
+    target = int(child_project_id)
+    current = int(parent_project_id)
+    visited: set[int] = set()
+    while current:
+        if current in visited:
+            return True
+        visited.add(current)
+        if current == target:
+            return True
+        link = active_parent_link(current)
+        if link is None:
+            break
+        current = int(link.parent_project_id)
+    return False
+
+
+def attach_project_link(
+    parent_project_id: int,
+    child_project_id: int,
+    *,
+    start_date: date | None = None,
+) -> ProjectLink:
+    parent = db.session.get(Project, int(parent_project_id))
+    child = db.session.get(Project, int(child_project_id))
+    if parent is None or child is None:
+        raise ValueError("项目不存在")
+    if int(parent.id) == int(child.id):
+        raise ValueError("项目不能关联自身")
+    if active_parent_link(int(child.id)) is not None:
+        raise ValueError("该子项目已经存在生效中的父项目关联")
+    if would_create_link_cycle(int(parent.id), int(child.id)):
+        raise ValueError("该关联会导致循环关系")
+
+    link = ProjectLink(
+        parent_project_id=int(parent.id),
+        child_project_id=int(child.id),
+        status="active",
+        start_date=start_date or date.today(),
+        created_by_user_id=(
+            int(current_user.id)
+            if getattr(current_user, "is_authenticated", False)
+            else None
+        ),
+    )
+    db.session.add(link)
+    db.session.flush()
+    return link
 
 
 __all__ = [name for name in dir() if not name.startswith("__")]

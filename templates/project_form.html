@@ -11,11 +11,19 @@
         {{ form.name(class="form-control") }}
       </div>
 
-      <div class="mb-3">
-        <label class="form-label">隶属于（父项目）</label>
-        {{ form.parent_project_id(class="form-select", id="parent_project_select") }}
-        <div class="form-text">选填。如果这是一个子项目，选择其所属的父项目。父项目成员可穿透查看此项目。</div>
-      </div>
+      {% if mode == 'create' and is_super_admin %}
+        {% if request.args.get('attach_child_id') %}
+          <div class="alert alert-info py-2 small">
+            正在为已有项目创建父项目。创建成功后会自动建立隐藏关联，子项目成员不会看到父项目。
+          </div>
+        {% else %}
+          <div class="mb-3">
+            <label class="form-label">隶属于（父项目）</label>
+            {{ form.parent_project_id(class="form-select", id="parent_project_select") }}
+            <div class="form-text">仅内置 admin 可选择。父子关系不会授予双方任何账目访问权。</div>
+          </div>
+        {% endif %}
+      {% endif %}
 
       <div class="mb-3" id="dividend_field_wrap" style="display: none;">
         <label class="form-label">允许分红</label>

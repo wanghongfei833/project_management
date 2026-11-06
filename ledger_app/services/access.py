@@ -13,6 +13,15 @@ def is_admin() -> bool:
     return getattr(current_user, "role", None) == Role.ADMIN.value
 
 
+def is_super_admin() -> bool:
+    """内置 admin 超级账号：即使其他账号角色也是 admin，也不能管理项目关联。"""
+    return bool(
+        getattr(current_user, "is_authenticated", False)
+        and getattr(current_user, "username", None) == "admin"
+        and is_admin()
+    )
+
+
 def _admin_user_ids() -> set[int]:
     rows = db.session.query(User.id).filter(User.role == Role.ADMIN.value).all()
     return {int(r[0]) for r in rows}

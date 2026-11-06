@@ -166,7 +166,9 @@ def export_projects_csv():
         base = [Transaction.project_id == p.id, Transaction.is_void.is_(False), Transaction.status == "active"]
         received = _sum(*base, Transaction.type == TransactionType.INCOME.value, Transaction.settled.is_(True))
         expense = _sum(*base, Transaction.type == TransactionType.EXPENSE.value, Transaction.settled.is_(True))
-        expected_total = int(project_expected_total_cents(int(p.id)))
+        expected_total = int(
+            project_link_summary(int(p.id)).total_receivable_cents
+        )
         fin = build_project_finance(
             p,
             expected_total_cents=expected_total,

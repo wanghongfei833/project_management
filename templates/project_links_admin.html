@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}隐藏项目关联 - 项目账本{% endblock %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h4 mb-1">隐藏项目关联</h1>
+      <div class="text-muted small">仅内置 admin 可见。子项目成员不会看到父项目或本页面。</div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">关联两个已有项目</div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('main.project_link_attach') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+              <label class="form-label">父项目</label>
+              <select class="form-select" name="parent_project_id" required>
+                <option value="">请选择</option>
+                {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">子项目</label>
+              <select class="form-select" name="child_project_id" required>
+                <option value="">请选择</option>
+                {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">生效日期</label>
+              <input class="form-control" type="date" name="start_date" value="{{ today }}">
+            </div>
+            <button class="btn btn-primary w-100" type="submit">建立隐藏关联</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">为已有项目新建父项目</div>
+        <div class="card-body">
+          <p class="text-muted small">先选择已有子项目，然后进入新建项目页。新项目创建成功后会自动与该子项目建立隐藏关联。</p>
+          <form method="get" action="{{ url_for('main.projects_new') }}">
+            <div class="mb-3">
+              <label class="form-label">已有项目</label>
+              <select class="form-select" name="attach_child_id" required>
+                <option value="">请选择</option>
+                {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <button class="btn btn-outline-primary w-100" type="submit">新建父项目并关联</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header fw-semibold">当前与历史关联</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>父项目</th><th>子项目</th><th>开始</th><th>结束</th><th>状态</th><th></th></tr></thead>
+        <tbody>
+          {% for link in links %}
+            <tr>
+              <td>{{ link.parent_project.name if link.parent_project else '—' }}</td>
+              <td>{{ link.child_project.name if link.child_project else '—' }}</td>
+              <td class="small text-muted">{{ link.start_date }}</td>
+              <td class="small text-muted">{{ link.end_date or '—' }}</td>
+              <td>
+                {% if link.status == 'active' %}
+                  <span class="badge text-bg-success">生效中</span>
+                {% else %}
+                  <span class="badge text-bg-secondary">已结束</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                {% if link.status == 'active' %}
+                  <form method="post" action="{{ url_for('main.project_link_end', link_id=link.id) }}"
+                        onsubmit="return confirm('确认结束这条项目关联？');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger py-0" type="submit">结束关联</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="text-muted">暂无项目关联</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
