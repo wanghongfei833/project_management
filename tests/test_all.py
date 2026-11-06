@@ -2359,6 +2359,11 @@ class TestPaymentWorkflow:
         assert tx.paid_by_user_id == seed["users"]["wang"]
         assert tx.payment_status == "paid"
 
+        html = client.get("/finance").get_data(as_text=True)
+        assert "选择文件" in html
+        assert "粘贴剪贴板" in html
+        assert "上传并闭环" in html
+
         # 4) 上传回单 → 闭环
         rv = client.post(
             f"/finance/payments/{tx.id}/receipt",

@@ -87,10 +87,13 @@
             <td class="small">{{ item.requester }}</td>
             <td>
               <form method="post" enctype="multipart/form-data"
-                    action="{{ url_for('main.finance_upload_receipt', transaction_id=tx.id) }}" class="d-flex gap-1">
+                    action="{{ url_for('main.finance_upload_receipt', transaction_id=tx.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input class="form-control form-control-sm" type="file" name="attachments" multiple>
-                <button class="btn btn-sm btn-outline-primary flex-shrink-0" type="submit">上传闭环</button>
+                {% from "_upload.html" import upload_field %}
+                {{ upload_field("receipt_upload_" ~ tx.id, "支持多选、拖拽和 Ctrl+V。", true) }}
+                <div class="d-flex justify-content-end mt-2">
+                  <button class="btn btn-sm btn-outline-primary" type="submit">上传并闭环</button>
+                </div>
               </form>
             </td>
           </tr>

@@ -1,7 +1,7 @@
 {# 通用附件上传区：大号点击/拖拽区 + Ctrl+V 粘贴 + 提交前缩略图预览（点图放大）+ 清空。
    用法：{% from "_upload.html" import upload_field %} 然后 {{ upload_field("attachments_x") }} #}
-{% macro upload_field(input_id, extra_hint="") %}
-  <div class="upload-zone" id="{{ input_id }}-zone">
+{% macro upload_field(input_id, extra_hint="", compact=false) %}
+  <div class="upload-zone{% if compact %} upload-zone-compact{% endif %}" id="{{ input_id }}-zone">
     <input class="visually-hidden" type="file" name="attachments" id="{{ input_id }}" multiple>
     <div class="upload-cta" id="{{ input_id }}-cta">
       <div class="upload-icon">📎</div>
@@ -11,9 +11,11 @@
         {%- if extra_hint %}<br>{{ extra_hint }}{% endif %}
       </div>
     </div>
-    <div class="d-none align-items-center gap-2 small text-muted mt-2" id="{{ input_id }}-meta">
-      <span id="{{ input_id }}-count"></span>
-      <button type="button" class="btn btn-sm btn-outline-secondary py-0" id="{{ input_id }}-clear">清空</button>
+    <div class="d-flex align-items-center flex-wrap gap-2">
+      <button type="button" class="btn btn-sm btn-outline-primary" id="{{ input_id }}-choose">选择文件</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="{{ input_id }}-paste">粘贴剪贴板</button>
+      <span class="small text-muted" id="{{ input_id }}-count"></span>
+      <button type="button" class="btn btn-sm btn-link text-secondary d-none" id="{{ input_id }}-clear">清空</button>
     </div>
     <div class="row g-2 mt-2" id="{{ input_id }}-preview"></div>
     <div class="small text-danger mt-1 d-none" id="{{ input_id }}-warn">
@@ -28,8 +30,9 @@
     input.dataset.uploadReady = "1";
     var zone = document.getElementById(id + "-zone");
     var preview = document.getElementById(id + "-preview");
-    var meta = document.getElementById(id + "-meta");
     var countEl = document.getElementById(id + "-count");
+    var chooseBtn = document.getElementById(id + "-choose");
+    var pasteBtn = document.getElementById(id + "-paste");
     var clearBtn = document.getElementById(id + "-clear");
     var warnEl = document.getElementById(id + "-warn");
     var MAX_TOTAL = 25 * 1024 * 1024;
@@ -45,6 +48,13 @@
       return (n / 1024 / 1024).toFixed(1) + " MB";
     }
     function sync() { input.files = dt.files; }
+    function activate() {
+      document.querySelectorAll(".upload-zone-active").forEach(function (el) {
+        if (el !== zone) el.classList.remove("upload-zone-active");
+      });
+      zone.classList.add("upload-zone-active");
+      window._activeUploadZone = zone;
+    }
 
     function render() {
       var files = list();
@@ -88,13 +98,11 @@
         preview.appendChild(col);
       });
       if (files.length) {
-        meta.classList.remove("d-none");
-        meta.classList.add("d-flex");
         countEl.textContent = "已选 " + files.length + " 个文件 · 共 " + human(total);
+        clearBtn.classList.remove("d-none");
       } else {
-        meta.classList.add("d-none");
-        meta.classList.remove("d-flex");
         countEl.textContent = "";
+        clearBtn.classList.add("d-none");
       }
       if (warnEl) warnEl.classList.toggle("d-none", total <= MAX_TOTAL);
     }
@@ -112,12 +120,50 @@
       sync();
       render();
     }
+    async function pasteFromClipboard() {
+      activate();
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        alert("当前浏览器不支持读取剪贴板，请点击页面后按 Ctrl+V 粘贴截图。");
+        return;
+      }
+      try {
+        var clipboardItems = await navigator.clipboard.read();
+        var pasted = [];
+        for (var i = 0; i < clipboardItems.length; i++) {
+          var types = clipboardItems[i].types || [];
+          for (var j = 0; j < types.length; j++) {
+            var type = types[j];
+            if (type.indexOf("image/") !== 0) continue;
+            var blob = await clipboardItems[i].getType(type);
+            var ext = type.split("/")[1].replace("jpeg", "jpg");
+            pasted.push(new File(
+              [blob],
+              "粘贴图片-" + Date.now() + "-" + i + "." + ext,
+              {type: type}
+            ));
+          }
+        }
+        if (!pasted.length) {
+          alert("剪贴板中没有图片文件，请先复制或截图。");
+          return;
+        }
+        addFiles(pasted);
+      } catch (err) {
+        alert("无法读取剪贴板。请允许浏览器剪贴板权限，或点击页面后按 Ctrl+V。");
+      }
+    }
 
     // 点整个区域都能选文件（点缩略图/按钮除外）
     zone.addEventListener("click", function (e) {
+      activate();
       if (e.target.closest(".upload-thumb") || e.target.closest("button")) return;
       input.click();
     });
+    if (chooseBtn) chooseBtn.addEventListener("click", function () {
+      activate();
+      input.click();
+    });
+    if (pasteBtn) pasteBtn.addEventListener("click", pasteFromClipboard);
     input.addEventListener("change", function () {
       var picked = input.files;
       dt = new DataTransfer();
@@ -134,6 +180,9 @@
     });
     document.addEventListener("paste", function (e) {
       if (!document.body.contains(zone)) return;
+      var zones = document.querySelectorAll(".upload-zone");
+      if (window._activeUploadZone && window._activeUploadZone !== zone) return;
+      if (!window._activeUploadZone && zones.length > 1) return;
       var cb = e.clipboardData;
       if (!cb || !cb.files || !cb.files.length) return;
       e.preventDefault();
