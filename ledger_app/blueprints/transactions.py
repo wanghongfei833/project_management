@@ -100,10 +100,8 @@ def transactions_new():
         if not db.session.get(Project, pid):
             flash("所选项目不存在", "warning")
             return render_template("transaction_form.html", form=form, is_admin=is_admin())
-        is_workflow_expense = (
-            form.type.data == TransactionType.EXPENSE.value
-            and bool(form.use_payment_workflow.data)
-        )
+        # 所有支出都必须经过：项目审批 → 财务打款 → 上传回单闭环。
+        is_workflow_expense = form.type.data == TransactionType.EXPENSE.value
         # 项目负责人本身就是审批人；其发起的申请视为已同意，可直接生效。
         tx_status = (
             "active"

@@ -1057,10 +1057,42 @@ def _migration_0003_fund_pool() -> None:
     db.session.commit()
 
 
+def _migration_0004_close_legacy_expenses() -> None:
+    """把历史已结算支出补齐为已闭环，避免旧数据缺少付款状态。"""
+    if _table_exists("transactions") and _table_exists("projects"):
+        db.session.execute(
+            text(
+                """
+                UPDATE transactions
+                SET payment_status = 'closed',
+                    paid_amount_cents = COALESCE(paid_amount_cents, amount_cents),
+                    paid_at = COALESCE(paid_at, created_at),
+                    paid_by_user_id = COALESCE(
+                      paid_by_user_id,
+                      (
+                        SELECT p.leader_user_id
+                        FROM projects p
+                        WHERE p.id = transactions.project_id
+                      )
+                    ),
+                    payment_method = COALESCE(payment_method, '历史记录'),
+                    closed_at = COALESCE(closed_at, created_at)
+                WHERE type = 'expense'
+                  AND status = 'active'
+                  AND is_void = 0
+                  AND settled = 1
+                  AND payment_status IS NULL
+                """
+            )
+        )
+    db.session.commit()
+
+
 MIGRATIONS: list[tuple[str, str, Callable[[], None]]] = [
     ("0001", "历史建表/补列汇总（v0 → 2026-10 的全部列与表）", _migration_0001_historical_catchup),
     ("0002", "付款闭环：users.is_finance + transactions 付款/回单字段", _migration_0002_payment_workflow),
     ("0003", "资金账户：交易收支账户 + 项目资金池与内部划转", _migration_0003_fund_pool),
+    ("0004", "历史已结算支出补齐付款闭环状态", _migration_0004_close_legacy_expenses),
 ]
 
 

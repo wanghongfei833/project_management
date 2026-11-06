@@ -398,12 +398,27 @@ class TestFinanceCalculation:
         }, follow_redirects=True)
 
     def _create_expense(self, client, pid, amount, note=""):
-        return client.post("/transactions/new", data={
+        rv = client.post("/transactions/new", data={
             "project_id": pid, "type": "expense",
             "amount_yuan": str(amount),
             "occur_date": "2026-06-01", "settled": 1,
             "counterparty": "供应商", "note": note,
         }, follow_redirects=True)
+        tx = (
+            Transaction.query.filter_by(project_id=pid, type="expense")
+            .order_by(Transaction.id.desc())
+            .first()
+        )
+        if tx and not tx.settled:
+            client.post(
+                f"/finance/payments/{tx.id}/pay",
+                data={
+                    "paid_amount_yuan": str(amount),
+                    "payment_method": "银行转账",
+                },
+                follow_redirects=True,
+            )
+        return rv
 
     def _get_finance(self, client, pid):
         rv = client.get(f"/projects/{pid}")
@@ -698,7 +713,8 @@ class TestPendingApprovals:
         assert tx.status == "active"
 
         html = client.get("/approvals").data.decode("utf-8")
-        assert "ProjTodo" not in html
+        assert f"/transactions/{tx.id}/create-approve" not in html
+        assert "待打款" in html
 
     def test_project_end_request_notifies_other_member(self, client):
         p = self._fresh_project("ProjTodoEnd")
@@ -2265,6 +2281,33 @@ class TestPaymentWorkflow:
         assert tx.status == "active"
         assert tx.payment_status == "approved"
         assert TransactionCreateRequest.query.filter_by(transaction_id=tx.id).first() is None
+
+    def test_expense_cannot_bypass_finance_workflow(self, client):
+        """支出即使不提交旧开关字段，也必须等待财务打款和回单闭环。"""
+        p = self._project("ProjNoWorkflowBypass")
+        login(client, "wang")
+        client.post(
+            "/transactions/new",
+            data={
+                "project_id": p.id,
+                "type": "expense",
+                "amount_yuan": "66.00",
+                "occur_date": date.today().isoformat(),
+                "fund_account": FundAccount.PUBLIC.value,
+                "settled": "y",
+                "counterparty": "供应商",
+                "note": "不允许直接标记已付款",
+            },
+            follow_redirects=True,
+        )
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, type="expense")
+            .order_by(Transaction.id.desc())
+            .first()
+        )
+        assert tx.status == "active"
+        assert tx.settled is False
+        assert tx.payment_status == "approved"
 
     def test_full_closed_loop(self, client):
         import io

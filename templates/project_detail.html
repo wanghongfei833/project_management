@@ -481,7 +481,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
           <tr>
             <th>日期</th>
             <th>类型</th>
-            <th class="text-end">金额</th>
+            <th>金额</th>
             <th>状态</th>
             <th>对方</th>
             <th>发起人</th>
@@ -497,7 +497,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
             <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
               <td>{{ t.occur_date }}</td>
               <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
-              <td class="text-end">
+              <td>
                 ¥ {{ t.amount_cents|money }}
                 <span class="badge text-bg-light border text-muted" style="font-size:.6rem;">{{ fund_account_label(t.fund_account) }}</span>
               </td>
@@ -560,7 +560,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
       <thead>
         <tr>
           <th>日期</th>
-          <th class="text-end">金额</th>
+          <th>金额</th>
           <th class="text-end">结余</th>
           <th>对方</th>
           <th>发起人</th>
@@ -573,11 +573,15 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
         {% for t in transactions %}
           <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
             <td>{{ t.occur_date }}</td>
-            <td class="text-end">
+            <td>
               {% if t.type == 'income' %}<span class="text-success fw-bold">+</span>{% else %}<span class="text-danger fw-bold">−</span>{% endif %}
               ¥ {{ t.amount_cents|money }}
               <span class="badge text-bg-light border text-muted" style="font-size:.6rem;">{{ fund_account_label(t.fund_account) }}</span>
-              {% if t.settled %}<span class="badge text-bg-success-subtle text-success border-success-subtle" style="font-size:.6rem;">已到账</span>{% else %}<span class="badge text-bg-warning-subtle text-warning border-warning-subtle" style="font-size:.6rem;">未到账</span>{% endif %}
+              {% if t.type == 'income' %}
+                {% if t.settled %}<span class="badge text-bg-success-subtle text-success border-success-subtle" style="font-size:.6rem;">已到账</span>{% else %}<span class="badge text-bg-warning-subtle text-warning border-warning-subtle" style="font-size:.6rem;">未到账</span>{% endif %}
+              {% else %}
+                {% if t.settled %}<span class="badge text-bg-success-subtle text-success border-success-subtle" style="font-size:.6rem;">已付款</span>{% else %}<span class="badge text-bg-warning-subtle text-warning border-warning-subtle" style="font-size:.6rem;">未付款</span>{% endif %}
+              {% endif %}
               {% set pay_labels = {'pending': '待审批', 'approved': '待打款', 'paid': '待补回单', 'closed': '已闭环', 'rejected': '已驳回'} %}
               {% if t.payment_status %}
                 <span class="badge {% if t.payment_status == 'closed' %}text-bg-success{% elif t.payment_status == 'rejected' %}text-bg-danger{% else %}text-bg-info{% endif %}" style="font-size:.6rem;">

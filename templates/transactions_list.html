@@ -33,7 +33,7 @@
           <th>项目</th>
           <th>类型</th>
           <th>资金账户</th>
-          <th class="text-end">金额</th>
+          <th>金额</th>
           <th>状态</th>
           <th>对方</th>
           <th>凭证</th>
@@ -47,9 +47,13 @@
             <td>{{ t.project.name if t.project else '（无）' }}</td>
             <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
             <td><span class="badge text-bg-light border text-muted">{{ fund_account_label(t.fund_account) }}</span></td>
-            <td class="text-end">¥ {{ t.amount_cents|money }}</td>
+            <td>¥ {{ t.amount_cents|money }}</td>
             <td>
-              {{ '已结算' if t.settled else '未结算' }}
+              {% if t.settled %}
+                {{ '已到账' if t.type == 'income' else '已付款' }}
+              {% else %}
+                {{ '未到账' if t.type == 'income' else '未付款' }}
+              {% endif %}
               {% set pay_labels = {'pending': '待审批', 'approved': '待打款', 'paid': '待补回单', 'closed': '已闭环', 'rejected': '已驳回'} %}
               {% if t.payment_status %}
                 <div class="small mt-1">
