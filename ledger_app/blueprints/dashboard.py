@@ -2,6 +2,69 @@
 from ._common import *  # noqa: F401,F403
 
 
+def _visible_project_tree(projects, links):
+    """按当前用户可见范围构建树；不可见子项目只对父项目成员显示受限节点。"""
+    visible = {int(p.id): p for p in projects}
+    links_by_parent: dict[int, list[ProjectLink]] = {}
+    for link in links:
+        if int(link.parent_project_id) not in visible:
+            continue
+        links_by_parent.setdefault(int(link.parent_project_id), []).append(link)
+
+    child_with_visible_parent = {
+        int(link.child_project_id)
+        for link_list in links_by_parent.values()
+        for link in link_list
+    }
+    roots = [
+        p
+        for p in sorted(projects, key=lambda item: item.id, reverse=True)
+        if int(p.id) not in child_with_visible_parent
+    ]
+
+    rows = []
+    seen = set()
+
+    def walk(project, depth, accessible, prefix):
+        pid = int(project.id)
+        if pid in seen:
+            return
+        seen.add(pid)
+        rows.append(
+            {
+                "project": project,
+                "depth": depth,
+                "accessible": accessible,
+                "prefix": prefix,
+                "is_parent": bool(
+                    accessible and links_by_parent.get(pid)
+                ),
+                "receivable_cents": (
+                    project_link_summary(pid).total_receivable_cents
+                    if accessible
+                    else None
+                ),
+            }
+        )
+        if not accessible:
+            return
+        children = links_by_parent.get(pid, [])
+        for idx, link in enumerate(children):
+            child = db.session.get(Project, int(link.child_project_id))
+            if child is None:
+                continue
+            walk(
+                child,
+                depth + 1,
+                int(child.id) in visible,
+                "└─ " if idx == len(children) - 1 else "├─ ",
+            )
+
+    for root in roots:
+        walk(root, 0, True, "")
+    return rows
+
+
 
 @bp.get("/")
 @login_required
@@ -26,6 +89,13 @@ def dashboard():
     expense_cents = expense_q.scalar()
 
     projects = _accessible_projects_query().order_by(Project.id.desc()).all()
+    visible_project_ids = {int(p.id) for p in projects}
+    project_links = (
+        ProjectLink.query.filter_by(status="active")
+        .order_by(ProjectLink.id.asc())
+        .all()
+    )
+    project_tree_rows = _visible_project_tree(projects, project_links)
     # 各项目「实际已付中介费」（一次查完，避免逐个项目查库）
     broker_paid_by_project = {
         int(pid): int(total or 0)
@@ -134,13 +204,6 @@ def dashboard():
         key=lambda r: r["remaining_net_cash_cents"], reverse=True
     )[:10]
 
-    # 构建子项目映射：{parent_id: [child_row, ...]}
-    child_rows_map = {}
-    for r in active_rows:
-        p = r["project"]
-        if p.parent_project_id:
-            ppid = int(p.parent_project_id)
-            child_rows_map.setdefault(ppid, []).append(r)
     chart_projects = {
         "labels": [r["project"].name for r in top_projects],
         "remaining": [int(r["remaining_net_cents"]) / 100 for r in top_projects],
@@ -182,6 +245,7 @@ def dashboard():
         net_cents=int(income_cents) - int(expense_cents),
         surplus_cents=int(surplus_cents),
         project_rows=active_rows_page,
+        project_tree_rows=project_tree_rows,
         list_page=list_page,
         list_pages=list_pages,
         list_total=list_total,
@@ -193,7 +257,6 @@ def dashboard():
         active_count=active_count,
         ended_count=ended_count,
         ended_rows=ended_rows,
-        child_rows_map=child_rows_map,
         ended_total_income=ended_total_income,
         ended_total_expense=ended_total_expense,
         ended_total_profit=ended_total_profit,

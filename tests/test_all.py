@@ -271,6 +271,25 @@ class TestParentChild:
             ).delete()
             _db.session.commit()
 
+    def test_dashboard_tree_does_not_reveal_parent_to_child_member(self, client):
+        seed = get_seed()
+        login(client, "wai1")
+        html = client.get("/").get_data(as_text=True)
+        assert "ProjA1" in html
+        assert f'href="/projects/{seed["projects"]["A"]}"' not in html
+        assert "ProjA2" not in html
+
+    def test_dashboard_tree_marks_inaccessible_children_as_restricted(self, client):
+        seed = get_seed()
+        login(client, "wang")
+        html = client.get("/").get_data(as_text=True)
+        assert "项目关系" in html
+        assert "ProjA1" in html
+        assert "ProjA2" in html
+        assert "仅关联信息" in html
+        assert f'href="/projects/{seed["projects"]["A1"]}"' not in html
+        assert f'href="/projects/{seed["projects"]["A2"]}"' not in html
+
     def test_child_member_cannot_view_sibling(self, client):
         login(client, "wai1")
         seed = get_seed()
