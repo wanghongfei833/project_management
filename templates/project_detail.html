@@ -562,10 +562,13 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
           <th>日期</th>
           <th>金额</th>
           <th class="text-end">结余</th>
+          <th>资金账户</th>
+          <th>状态</th>
           <th>对方</th>
           <th>发起人</th>
           <th>备注</th>
           <th>凭证</th>
+          <th class="text-end">操作</th>
         </tr>
       </thead>
       <tbody>
@@ -576,35 +579,30 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
             <td>
               {% if t.type == 'income' %}<span class="text-success fw-bold">+</span>{% else %}<span class="text-danger fw-bold">−</span>{% endif %}
               ¥ {{ t.amount_cents|money }}
-              <span class="badge text-bg-light border text-muted" style="font-size:.6rem;">{{ fund_account_label(t.fund_account) }}</span>
-              {% if t.type == 'income' %}
-                {% if t.settled %}<span class="badge text-bg-success-subtle text-success border-success-subtle" style="font-size:.6rem;">已到账</span>{% else %}<span class="badge text-bg-warning-subtle text-warning border-warning-subtle" style="font-size:.6rem;">未到账</span>{% endif %}
-              {% else %}
-                {% if t.settled %}<span class="badge text-bg-success-subtle text-success border-success-subtle" style="font-size:.6rem;">已付款</span>{% else %}<span class="badge text-bg-warning-subtle text-warning border-warning-subtle" style="font-size:.6rem;">未付款</span>{% endif %}
-              {% endif %}
-              {% set pay_labels = {'pending': '待审批', 'approved': '待打款', 'paid': '待补回单', 'closed': '已闭环', 'rejected': '已驳回'} %}
-              {% if t.payment_status %}
-                <span class="badge {% if t.payment_status == 'closed' %}text-bg-success{% elif t.payment_status == 'rejected' %}text-bg-danger{% else %}text-bg-info{% endif %}" style="font-size:.6rem;">
-                  {{ pay_labels.get(t.payment_status, t.payment_status) }}
-                </span>
-              {% endif %}
-              {% if t.status == 'active' and project.status != 'ended' and current_user.id in member_ids %}
-                <div class="dropdown d-inline ms-1">
-                  <a href="#" class="text-muted dropdown-toggle text-decoration-none" data-bs-toggle="dropdown" aria-expanded="false" style="font-size:.85rem;">⚙️</a>
-                  <ul class="dropdown-menu dropdown-menu-end" style="min-width: auto;">
-                    <li><a class="dropdown-item small" href="{{ url_for('main.transactions_edit', transaction_id=t.id) }}">✏️ 修改</a></li>
-                    <li>
-                      <form method="post" action="{{ url_for('main.transactions_delete_request', transaction_id=t.id) }}"
-                            onsubmit="return confirm('确认发起删除申请？需审核通过后才能执行删除。');">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="dropdown-item small" type="submit">🗑️ 删除</button>
-                      </form>
-                    </li>
-                  </ul>
-                </div>
-              {% endif %}
             </td>
             <td class="text-end small fw-semibold">¥ {{ (balance_after_by_tx_id.get(t.id, 0))|money }}</td>
+            <td class="small text-nowrap">
+              <span class="badge text-bg-light border text-muted">{{ fund_account_label(t.fund_account) }}</span>
+            </td>
+            <td class="small text-nowrap">
+              {% if t.type == 'income' %}
+                {% if t.settled %}
+                  <span class="badge text-bg-success-subtle text-success border-success-subtle">已到账</span>
+                {% else %}
+                  <span class="badge text-bg-warning-subtle text-warning border-warning-subtle">未到账</span>
+                {% endif %}
+              {% elif t.payment_status == 'pending' %}
+                <span class="badge text-bg-warning">待审批</span>
+              {% elif t.payment_status == 'approved' %}
+                <span class="badge text-bg-info">待打款</span>
+              {% elif t.payment_status == 'paid' %}
+                <span class="badge text-bg-info">待补回单</span>
+              {% elif t.settled %}
+                <span class="badge text-bg-success-subtle text-success border-success-subtle">已付款</span>
+              {% else %}
+                <span class="badge text-bg-warning-subtle text-warning border-warning-subtle">未付款</span>
+              {% endif %}
+            </td>
             <td>{% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}{{ user_name_map[t.recipient_user_id] }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
             <td class="small">{{ t.created_by.username if t.created_by else '—' }}</td>
             <td class="text-truncate" style="max-width: 360px;">{{ t.note or '' }}</td>
@@ -677,9 +675,28 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
                 <span class="text-muted">无</span>
               {% endif %}
             </td>
+            <td class="text-end">
+              {% if t.status == 'active' and project.status != 'ended' and current_user.id in member_ids %}
+                <div class="dropdown">
+                  <a href="#" class="text-muted dropdown-toggle text-decoration-none" data-bs-toggle="dropdown" aria-expanded="false">⚙️</a>
+                  <ul class="dropdown-menu dropdown-menu-end" style="min-width: auto;">
+                    <li><a class="dropdown-item small" href="{{ url_for('main.transactions_edit', transaction_id=t.id) }}">✏️ 修改</a></li>
+                    <li>
+                      <form method="post" action="{{ url_for('main.transactions_delete_request', transaction_id=t.id) }}"
+                            onsubmit="return confirm('确认发起删除申请？需审核通过后才能执行删除。');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="dropdown-item small" type="submit">🗑️ 删除</button>
+                      </form>
+                    </li>
+                  </ul>
+                </div>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="text-muted">暂无流水</td></tr>
+          <tr><td colspan="10" class="text-muted">暂无流水</td></tr>
         {% endfor %}
       </tbody>
     </table>

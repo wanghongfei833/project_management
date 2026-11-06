@@ -49,18 +49,22 @@
             <td><span class="badge text-bg-light border text-muted">{{ fund_account_label(t.fund_account) }}</span></td>
             <td>¥ {{ t.amount_cents|money }}</td>
             <td>
-              {% if t.settled %}
-                {{ '已到账' if t.type == 'income' else '已付款' }}
+              {% if t.type == 'income' %}
+                {% if t.settled %}
+                  <span class="badge text-bg-success-subtle text-success border-success-subtle">已到账</span>
+                {% else %}
+                  <span class="badge text-bg-warning-subtle text-warning border-warning-subtle">未到账</span>
+                {% endif %}
+              {% elif t.payment_status == 'pending' %}
+                <span class="badge text-bg-warning">待审批</span>
+              {% elif t.payment_status == 'approved' %}
+                <span class="badge text-bg-info">待打款</span>
+              {% elif t.payment_status == 'paid' %}
+                <span class="badge text-bg-info">待补回单</span>
+              {% elif t.settled %}
+                <span class="badge text-bg-success-subtle text-success border-success-subtle">已付款</span>
               {% else %}
-                {{ '未到账' if t.type == 'income' else '未付款' }}
-              {% endif %}
-              {% set pay_labels = {'pending': '待审批', 'approved': '待打款', 'paid': '待补回单', 'closed': '已闭环', 'rejected': '已驳回'} %}
-              {% if t.payment_status %}
-                <div class="small mt-1">
-                  <span class="badge {% if t.payment_status == 'closed' %}text-bg-success{% elif t.payment_status == 'rejected' %}text-bg-danger{% else %}text-bg-info{% endif %}">
-                    {{ pay_labels.get(t.payment_status, t.payment_status) }}
-                  </span>
-                </div>
+                <span class="badge text-bg-warning-subtle text-warning border-warning-subtle">未付款</span>
               {% endif %}
             </td>
             <td>{% if t.counterparty == '项目人员' and t.recipient_user %}{{ t.recipient_user.username }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
