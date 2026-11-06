@@ -177,9 +177,10 @@ def export_projects_csv():
             .scalar()
             or 0
         )
-        expected_total = int(
-            project_link_summary(int(p.id)).total_receivable_cents
-        )
+        link_summary = project_link_summary(int(p.id))
+        expected_total = int(link_summary.total_receivable_cents)
+        if link_summary.children:
+            received = int(link_summary.total_received_cents)
         fin = build_project_finance(
             p,
             expected_total_cents=expected_total,

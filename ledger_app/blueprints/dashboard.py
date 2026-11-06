@@ -40,7 +40,7 @@ def _visible_project_tree(projects, links):
                     accessible and links_by_parent.get(pid)
                 ),
                 "receivable_cents": (
-                    project_link_summary(pid).total_receivable_cents
+                    project_link_summary(pid).total_outstanding_cents
                     if accessible
                     else None
                 ),
@@ -135,9 +135,10 @@ def dashboard():
             .scalar()
         )
         received_gross = int(received_gross or 0)
-        expected_total_cents = int(
-            project_link_summary(int(p.id)).total_receivable_cents
-        )
+        link_summary = project_link_summary(int(p.id))
+        expected_total_cents = int(link_summary.total_receivable_cents)
+        if link_summary.children:
+            received_gross = int(link_summary.total_received_cents)
         fin = build_project_finance(
             p,
             expected_total_cents=expected_total_cents,

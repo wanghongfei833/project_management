@@ -11,6 +11,7 @@ from ..models import (
     Project,
     ProjectExpectedIncomeAdjustment,
     ProjectLink,
+    Transaction,
 )
 
 
@@ -18,15 +19,23 @@ from ..models import (
 class LinkedProjectRow:
     link: ProjectLink
     child: Project
-    current_receivable_cents: int
+    contract_cents: int
+    received_cents: int
+    outstanding_cents: int
 
 
 @dataclass(frozen=True)
 class ProjectLinkSummary:
     project: Project | None
     base_receivable_cents: int
+    base_received_cents: int
+    base_outstanding_cents: int
     linked_receivable_cents: int
+    linked_received_cents: int
+    linked_outstanding_cents: int
     total_receivable_cents: int
+    total_received_cents: int
+    total_outstanding_cents: int
     children: list[LinkedProjectRow]
 
 
@@ -48,6 +57,23 @@ def base_project_receivable_cents(project_id: int) -> int:
         or 0
     )
     return int(project.expected_income_cents or 0) + extra
+
+
+def project_received_cents(project_id: int) -> int:
+    return int(
+        db.session.query(
+            db.func.coalesce(db.func.sum(Transaction.amount_cents), 0)
+        )
+        .filter(
+            Transaction.project_id == int(project_id),
+            Transaction.type == "income",
+            Transaction.status == "active",
+            Transaction.is_void.is_(False),
+            Transaction.settled.is_(True),
+        )
+        .scalar()
+        or 0
+    )
 
 
 def active_child_links(parent_project_id: int) -> list[ProjectLink]:
@@ -75,34 +101,46 @@ def active_parent_link(child_project_id: int) -> ProjectLink | None:
 def project_link_summary(project_id: int) -> ProjectLinkSummary:
     project = db.session.get(Project, int(project_id))
     if project is None:
-        return ProjectLinkSummary(None, 0, 0, 0, [])
+        return ProjectLinkSummary(None, 0, 0, 0, 0, 0, 0, 0, 0, 0, [])
     base = base_project_receivable_cents(int(project.id))
+    base_received = project_received_cents(int(project.id))
+    base_outstanding = max(base - base_received, 0)
     children: list[LinkedProjectRow] = []
     for link in active_child_links(int(project.id)):
         child = db.session.get(Project, int(link.child_project_id))
         if child is None:
             continue
+        child_contract = base_project_receivable_cents(int(child.id))
+        child_received = project_received_cents(int(child.id))
         children.append(
             LinkedProjectRow(
                 link=link,
                 child=child,
-                current_receivable_cents=base_project_receivable_cents(
-                    int(child.id)
-                ),
+                contract_cents=child_contract,
+                received_cents=child_received,
+                outstanding_cents=max(child_contract - child_received, 0),
             )
         )
-    linked = sum(row.current_receivable_cents for row in children)
+    linked_contract = sum(row.contract_cents for row in children)
+    linked_received = sum(row.received_cents for row in children)
+    linked_outstanding = sum(row.outstanding_cents for row in children)
     return ProjectLinkSummary(
         project=project,
         base_receivable_cents=base,
-        linked_receivable_cents=linked,
-        total_receivable_cents=base + linked,
+        base_received_cents=base_received,
+        base_outstanding_cents=base_outstanding,
+        linked_receivable_cents=linked_contract,
+        linked_received_cents=linked_received,
+        linked_outstanding_cents=linked_outstanding,
+        total_receivable_cents=base + linked_contract,
+        total_received_cents=base_received + linked_received,
+        total_outstanding_cents=base_outstanding + linked_outstanding,
         children=children,
     )
 
 
 def project_total_receivable_cents(project_id: int) -> int:
-    return project_link_summary(project_id).total_receivable_cents
+    return project_link_summary(project_id).total_outstanding_cents
 
 
 def would_create_link_cycle(parent_project_id: int, child_project_id: int) -> bool:

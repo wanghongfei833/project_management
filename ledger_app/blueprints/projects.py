@@ -732,6 +732,11 @@ def project_detail(project_id: int):
     broker_unpaid_cents = finance["broker_unpaid_cents"]
     broker_fee_expected_total_cents = finance["broker_fee_expected_total_cents"]
     broker_estimated_cents = finance["broker_estimated_on_received_cents"]
+    if is_parent:
+        remaining_gross_cents = int(link_summary.total_outstanding_cents)
+        remaining_net_cash_cents = max(
+            remaining_gross_cents - int(broker_unpaid_cents), 0
+        )
 
     profit_realized_cents = int(received_net_cents) - int(paid_cents)
     profit_if_fully_collected_cents = int(expected_net_cents) - int(paid_cents)

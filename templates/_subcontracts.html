@@ -2,31 +2,44 @@
   <div class="card mb-4" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.05);border:1px solid #e8ecf0;">
     <div class="card-header py-2" style="background:linear-gradient(135deg,#4f6b55,#385142);color:#fff;border-radius:10px 10px 0 0;">
       <span class="fw-bold">🧾 关联项目应收</span>
-      <span class="small ms-2 opacity-75">关联项目当前应收实时计入本项目总应收</span>
+      <span class="small ms-2 opacity-75">合同额、已收和未收应收分开实时计算</span>
     </div>
     <div class="card-body">
       <div class="row g-2 mb-3">
         <div class="col-md-4">
           <div class="rounded-3 p-3 h-100" style="background:#f7fafc;border:1px solid #e8ecf0;">
-            <div class="text-muted small">本项目基础应收</div>
+            <div class="text-muted small">本项目合同应收</div>
             <div class="fs-5 fw-bold">¥ {{ link_summary.base_receivable_cents|money }}</div>
+            <div class="text-muted small mt-1">
+              已收 ¥{{ link_summary.base_received_cents|money }} ·
+              未收 ¥{{ link_summary.base_outstanding_cents|money }}
+            </div>
           </div>
         </div>
         <div class="col-md-4">
           <div class="rounded-3 p-3 h-100" style="background:#f2f8fb;border:1px solid #d9e8f0;">
-            <div class="text-muted small">关联项目应收合计（{{ link_summary.children|length }} 个）</div>
+            <div class="text-muted small">关联项目合同合计（{{ link_summary.children|length }} 个）</div>
             <div class="fs-5 fw-bold text-info">¥ {{ link_summary.linked_receivable_cents|money }}</div>
+            <div class="text-muted small mt-1">
+              已收 ¥{{ link_summary.linked_received_cents|money }} ·
+              未收 ¥{{ link_summary.linked_outstanding_cents|money }}
+            </div>
             <div class="mt-2 small" style="max-height:130px;overflow-y:auto;scrollbar-width:thin;">
               {% for row in link_summary.children %}
-                <div class="d-flex justify-content-between gap-2 py-1 border-top">
-                  <span class="text-truncate" title="{{ row.child.name }}">
+                <div class="py-1 border-top">
+                  <div class="d-flex justify-content-between gap-2">
+                    <span class="text-truncate" title="{{ row.child.name }}">
                     {% if is_admin or row.child.id in child_visible_ids %}
                       <a class="text-decoration-none" href="{{ url_for('main.project_detail', project_id=row.child.id) }}">{{ row.child.name }}</a>
                     {% else %}
                       {{ row.child.name }}
                     {% endif %}
-                  </span>
-                  <span class="fw-semibold text-nowrap">¥ {{ row.current_receivable_cents|money }}</span>
+                    </span>
+                    <span class="fw-semibold text-nowrap">合同 ¥{{ row.contract_cents|money }}</span>
+                  </div>
+                  <div class="text-muted text-end">
+                    已收 ¥{{ row.received_cents|money }} · 未收 ¥{{ row.outstanding_cents|money }}
+                  </div>
                 </div>
               {% else %}
                 <span class="text-muted">暂无关联项目</span>
@@ -36,13 +49,17 @@
         </div>
         <div class="col-md-4">
           <div class="rounded-3 p-3 h-100" style="background:#f6f8ff;border:1px solid #dfe5fa;">
-            <div class="text-muted small">本项目总应收</div>
-            <div class="fs-5 fw-bold text-primary">¥ {{ link_summary.total_receivable_cents|money }}</div>
+            <div class="text-muted small">项目总应收（未收）</div>
+            <div class="fs-5 fw-bold text-primary">¥ {{ link_summary.total_outstanding_cents|money }}</div>
+            <div class="text-muted small mt-1">
+              合同 ¥{{ link_summary.total_receivable_cents|money }} ·
+              已收 ¥{{ link_summary.total_received_cents|money }}
+            </div>
           </div>
         </div>
       </div>
       <div class="alert alert-light border py-2 small">
-        总应收 = 本项目基础应收 + 所有直接关联项目当前应收。
+        未收应收 = 本项目未收 + 所有直接关联项目的未收。
         关联项目内部流水不会并入本项目，关联关系也不会向对方项目展示。
       </div>
     </div>

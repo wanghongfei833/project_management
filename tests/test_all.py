@@ -387,6 +387,9 @@ class TestStrictSubcontractArchitecture:
         assert summary.base_receivable_cents == 5_000_000
         assert summary.linked_receivable_cents == 3_000_000
         assert summary.total_receivable_cents == 8_000_000
+        assert summary.linked_received_cents == 100_000
+        assert summary.linked_outstanding_cents == 2_900_000
+        assert summary.total_outstanding_cents == 7_900_000
         assert Transaction.query.filter_by(project_id=parent.id).count() == 0
 
         client.post("/logout")
@@ -404,6 +407,9 @@ class TestStrictSubcontractArchitecture:
         updated = project_link_summary(parent.id)
         assert updated.linked_receivable_cents == 2_000_000
         assert updated.total_receivable_cents == 7_000_000
+        assert updated.linked_received_cents == 100_000
+        assert updated.linked_outstanding_cents == 1_900_000
+        assert updated.total_outstanding_cents == 6_900_000
         assert Transaction.query.filter_by(project_id=parent.id).count() == 0
 
     def test_only_builtin_admin_can_hide_link_and_child_cannot_see_parent(self, client):
@@ -467,6 +473,7 @@ class TestStrictSubcontractArchitecture:
         ended_summary = project_link_summary(parent.id)
         assert ended_summary.linked_receivable_cents == 0
         assert ended_summary.total_receivable_cents == 5_000_000
+        assert ended_summary.total_outstanding_cents == 5_000_000
 
         child.expected_income_cents = 2_000_000
         _db.session.commit()
@@ -524,6 +531,7 @@ class TestStrictSubcontractArchitecture:
         assert summary.base_receivable_cents == 3_000_000
         assert summary.linked_receivable_cents == 5_000_000
         assert summary.total_receivable_cents == 8_000_000
+        assert summary.total_outstanding_cents == 8_000_000
 
 
 class TestTransactions:
