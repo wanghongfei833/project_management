@@ -78,7 +78,7 @@ def dashboard():
         # 已终止项目：计算分红数据
         div_paid = 0
         div_remaining = 0
-        if p.status == "ended":
+        if p.status == "ended" and p.can_dividend:
             dm = dividend_metrics(p.id, received_net_cents=int(fin["received_net_cents"]))
             div_paid = dm.paid_cents
             div_remaining = dm.remaining_cents

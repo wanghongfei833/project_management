@@ -1088,11 +1088,61 @@ def _migration_0004_close_legacy_expenses() -> None:
     db.session.commit()
 
 
+def _migration_0005_subcontract_settlements() -> None:
+    """主合同项目与分包项目的内部结算。"""
+    if not _table_exists("project_subcontract_settlements"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE project_subcontract_settlements (
+                  id INTEGER PRIMARY KEY,
+                  parent_project_id INTEGER NOT NULL,
+                  child_project_id INTEGER NOT NULL,
+                  parent_transaction_id INTEGER UNIQUE,
+                  child_transaction_id INTEGER UNIQUE,
+                  amount_cents BIGINT NOT NULL,
+                  status VARCHAR(24) NOT NULL DEFAULT 'pending_payment',
+                  note TEXT,
+                  created_by_user_id INTEGER,
+                  created_at DATETIME NOT NULL,
+                  paid_at DATETIME,
+                  received_at DATETIME,
+                  FOREIGN KEY(parent_project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                  FOREIGN KEY(child_project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                  FOREIGN KEY(parent_transaction_id) REFERENCES transactions(id) ON DELETE SET NULL,
+                  FOREIGN KEY(child_transaction_id) REFERENCES transactions(id) ON DELETE SET NULL,
+                  FOREIGN KEY(created_by_user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_project_subcontract_settlements_parent_project_id "
+                "ON project_subcontract_settlements (parent_project_id)"
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_project_subcontract_settlements_child_project_id "
+                "ON project_subcontract_settlements (child_project_id)"
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_project_subcontract_settlements_status "
+                "ON project_subcontract_settlements (status)"
+            )
+        )
+    db.session.commit()
+
+
 MIGRATIONS: list[tuple[str, str, Callable[[], None]]] = [
     ("0001", "历史建表/补列汇总（v0 → 2026-10 的全部列与表）", _migration_0001_historical_catchup),
     ("0002", "付款闭环：users.is_finance + transactions 付款/回单字段", _migration_0002_payment_workflow),
     ("0003", "资金账户：交易收支账户 + 项目资金池与内部划转", _migration_0003_fund_pool),
     ("0004", "历史已结算支出补齐付款闭环状态", _migration_0004_close_legacy_expenses),
+    ("0005", "父子项目严格隔离的内部分包结算", _migration_0005_subcontract_settlements),
 ]
 
 

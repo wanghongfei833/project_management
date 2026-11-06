@@ -1,0 +1,180 @@
+{% if is_parent %}
+  <div class="card mb-4" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.05);border:1px solid #e8ecf0;">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2"
+         style="background:linear-gradient(135deg,#4f6b55,#385142);color:#fff;border-radius:10px 10px 0 0;">
+      <div>
+        <span class="fw-bold">🧾 分包合同</span>
+        <span class="small ms-2 opacity-75">合同金额实时取自各分包项目，不重复写入主项目支出</span>
+      </div>
+      {% if project.status != 'ended' and (is_admin or current_user.id == project.leader_user_id) %}
+        <button class="btn btn-sm btn-light" type="button" data-bs-toggle="modal" data-bs-target="#subcontractPayModal">
+          发起分包付款
+        </button>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <div class="row g-2 mb-3">
+        <div class="col-md-3">
+          <div class="rounded-3 p-3 h-100" style="background:#f7fafc;border:1px solid #e8ecf0;">
+            <div class="text-muted small">当前分包合同合计</div>
+            <div class="fs-5 fw-bold">¥ {{ subcontract_summary.contract_cents|money }}</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="rounded-3 p-3 h-100" style="background:#f7fafc;border:1px solid #e8ecf0;">
+            <div class="text-muted small">已实际支付</div>
+            <div class="fs-5 fw-bold text-success">¥ {{ subcontract_summary.paid_cents|money }}</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="rounded-3 p-3 h-100" style="background:#fff8e8;border:1px solid #f0dfb5;">
+            <div class="text-muted small">待打款</div>
+            <div class="fs-5 fw-bold text-warning">¥ {{ subcontract_summary.pending_payment_cents|money }}</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="rounded-3 p-3 h-100" style="background:#f2f8fb;border:1px solid #d9e8f0;">
+            <div class="text-muted small">当前可安排付款</div>
+            <div class="fs-5 fw-bold text-info">¥ {{ subcontract_summary.available_to_pay_cents|money }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="alert alert-light border py-2 small">
+        主项目自身合同额 ¥{{ expected_total_cents|money }}，
+        当前分包合同合计 ¥{{ subcontract_summary.contract_cents|money }}，
+        合同毛差额 ¥{{ subcontract_summary.gross_margin_cents|money }}。
+        实际成本和现金余额仍以真实付款流水为准。
+        {% if subcontract_summary.overpaid_cents > 0 %}
+          <span class="text-danger fw-semibold">当前已出现多付 ¥{{ subcontract_summary.overpaid_cents|money }}，请登记退款或合同调整。</span>
+        {% endif %}
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>分包项目</th><th>合同金额</th><th>已付款</th><th>待打款</th>
+              <th>未付合同额</th><th>已多付</th><th>当前可付</th><th>项目状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in subcontract_summary.children %}
+              <tr>
+                <td>
+                  {% if is_admin or row.child.id in child_visible_ids %}
+                    <a href="{{ url_for('main.project_detail', project_id=row.child.id) }}">{{ row.child.name }}</a>
+                  {% else %}
+                    {{ row.child.name }}
+                  {% endif %}
+                </td>
+                <td>¥ {{ row.contract_cents|money }}</td>
+                <td class="text-success">¥ {{ row.paid_cents|money }}</td>
+                <td class="text-warning">¥ {{ row.pending_payment_cents|money }}</td>
+                <td>¥ {{ row.unpaid_commitment_cents|money }}</td>
+                <td class="{% if row.overpaid_cents %}text-danger fw-semibold{% endif %}">¥ {{ row.overpaid_cents|money }}</td>
+                <td>¥ {{ row.available_to_pay_cents|money }}</td>
+                <td>{{ '进行中' if row.child.status == 'open' else '已终止' }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="8" class="text-muted">暂无直接分包项目</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if subcontract_settlements %}
+        <hr>
+        <div class="fw-semibold mb-2">最近内部分包结算</div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>时间</th><th>分包项目</th><th>金额</th><th>状态</th><th>备注</th><th></th></tr></thead>
+            <tbody>
+              {% for settlement in subcontract_settlements %}
+                <tr>
+                  <td class="small text-muted">{{ settlement.created_at|dt }}</td>
+                  <td>{{ settlement.child_project.name if settlement.child_project else '—' }}</td>
+                  <td>¥ {{ settlement.amount_cents|money }}</td>
+                  <td>
+                    {% if settlement.status == 'pending_payment' %}
+                      <span class="badge text-bg-warning">待财务打款</span>
+                    {% elif settlement.status == 'pending_receipt' %}
+                      <span class="badge text-bg-info">待分包方确认收款</span>
+                    {% elif settlement.status == 'closed' %}
+                      <span class="badge text-bg-success">已闭环</span>
+                    {% else %}
+                      <span class="badge text-bg-secondary">已取消</span>
+                    {% endif %}
+                  </td>
+                  <td class="small">{{ settlement.note or '—' }}</td>
+                  <td class="text-end">
+                    {% if settlement.status == 'pending_payment' and (is_admin or current_user.id == project.leader_user_id) %}
+                      <form method="post"
+                            action="{{ url_for('main.subcontract_pay_cancel', project_id=project.id, settlement_id=settlement.id) }}"
+                            onsubmit="return confirm('确认取消这笔分包付款？');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-outline-danger py-0" type="submit">取消</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if project.status != 'ended' and (is_admin or current_user.id == project.leader_user_id) %}
+    <div class="modal fade" id="subcontractPayModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <form method="post" action="{{ url_for('main.subcontract_pay', project_id=project.id) }}">
+            {{ subcontract_form.hidden_tag() }}
+            <div class="modal-header">
+              <h5 class="modal-title">发起分包付款</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label">分包项目</label>
+                {{ subcontract_form.child_project_id(class="form-select") }}
+              </div>
+              <div class="mb-3">
+                <label class="form-label">本次付款金额（元）</label>
+                {{ subcontract_form.amount_yuan(class="form-control", placeholder="不能超过当前可付金额") }}
+              </div>
+              <div class="mb-3">
+                <label class="form-label">付款账户</label>
+                {{ subcontract_form.fund_account(class="form-select") }}
+              </div>
+              <div>
+                <label class="form-label">备注</label>
+                {{ subcontract_form.note(class="form-control", rows="2") }}
+                <div class="form-text">提交后进入财务待打款；主项目付款后，分包项目才会出现待确认收入。</div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">取消</button>
+              <button class="btn btn-primary" type="submit">提交财务打款</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% elif child_contract_info.parent_project %}
+  <div class="alert alert-light border mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div>
+        <span class="fw-semibold">分包来源：{{ child_contract_info.parent_project.name }}</span>
+        <span class="text-muted small ms-2">仅显示与您项目有关的合同和收款，不展示主项目账目。</span>
+      </div>
+      <div class="small">
+        合同 ¥{{ child_contract_info.contract_cents|money }}
+        · 已收 ¥{{ child_contract_info.received_cents|money }}
+        · 待确认 ¥{{ child_contract_info.pending_receipt_cents|money }}
+        · 未收 ¥{{ child_contract_info.outstanding_cents|money }}
+      </div>
+    </div>
+  </div>
+{% endif %}

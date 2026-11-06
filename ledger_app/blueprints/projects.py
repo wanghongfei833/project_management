@@ -18,8 +18,13 @@ def projects_new():
     users = User.query.filter_by(is_active=True).order_by(User.username.asc()).all()
     form.member_user_ids.choices = [(u.id, u.username) for u in users]
     form.leader_user_id.choices = [(u.id, u.username) for u in users]
-    # 父项目选择：只显示没有父项目的项目（独立项目或已是父项目）
-    parent_candidates = Project.query.filter(Project.status != "ended").order_by(Project.name.asc()).all()
+    # 只能把项目挂载到自己有明确成员权限的上级项目，父子关系不越权。
+    parent_candidates = (
+        _accessible_projects_query()
+        .filter(Project.status != "ended")
+        .order_by(Project.name.asc())
+        .all()
+    )
     form.parent_project_id.choices = [(0, "（无——独立项目）")] + [(p.id, p.name) for p in parent_candidates]
     # 构建父项目成员映射（用于前端JS分行显示）
     parent_members_map = {
@@ -491,14 +496,10 @@ def project_detail(project_id: int):
         flash("你不是该项目成员，无权查看。", "danger")
         return redirect(url_for("main.projects_list"))
 
-    # 父项目：聚合所有子项目数据
+    # 父子关系不授予数据权限，也不自动聚合父子流水。
     is_parent = bool(p.sub_projects)
-    if is_parent:
-        all_ids = _collect_all_sub_project_ids(int(p.id))
-        query_pid_filter = Transaction.project_id.in_(all_ids)
-    else:
-        query_pid_filter = Transaction.project_id == p.id
-    fund_project_ids = all_ids if is_parent else {int(p.id)}
+    query_pid_filter = Transaction.project_id == p.id
+    fund_project_ids = {int(p.id)}
     ensure_project_fund_pool(p, commit=True)
 
     tx_page = request.args.get("tx_page", 1, type=int) or 1
@@ -572,7 +573,7 @@ def project_detail(project_id: int):
         }
     adjustments = (
         ProjectExpectedIncomeAdjustment.query.options(joinedload(ProjectExpectedIncomeAdjustment.approvals))
-        .filter(ProjectExpectedIncomeAdjustment.project_id.in_(all_ids) if is_parent else ProjectExpectedIncomeAdjustment.project_id == p.id)
+        .filter(ProjectExpectedIncomeAdjustment.project_id == p.id)
         .order_by(ProjectExpectedIncomeAdjustment.created_at.desc())
         .all()
     )
@@ -583,6 +584,23 @@ def project_detail(project_id: int):
         .order_by(User.username.asc())
         .all()
     )
+    subcontract_summary = parent_contract_summary(int(p.id))
+    subcontract_form = SubcontractPaymentForm()
+    subcontract_form.child_project_id.choices = [
+        (int(row.child.id), row.child.name) for row in subcontract_summary.children
+    ]
+    subcontract_settlements = (
+        ProjectSubcontractSettlement.query.filter_by(
+            parent_project_id=int(p.id)
+        )
+        .order_by(
+            ProjectSubcontractSettlement.created_at.desc(),
+            ProjectSubcontractSettlement.id.desc(),
+        )
+        .limit(50)
+        .all()
+    )
+    child_contract_info = child_receivable_summary(int(p.id))
     fund_pool_form = FundPoolSettingsForm()
     fund_pool_form.custodian_user_id.choices = [
         (int(u.id), u.username) for u in members
@@ -679,24 +697,14 @@ def project_detail(project_id: int):
         .scalar()
         or 0
     )
-    if is_parent:
-        expected_total_cents = sum(project_expected_total_cents(sid) for sid in all_ids)
-        finance = build_project_finance(p, expected_total_cents=expected_total_cents,
-                                        received_settled_income_bank_cents=int(received_cents),
-                                        broker_paid_cents=broker_paid_cents)
-        balance_tmp = {}
-        for sid in all_ids:
-            balance_tmp.update(running_settled_cash_balance_by_transaction_id(sid))
-        balance_after_by_tx_id = balance_tmp
-    else:
-        expected_total_cents = int(project_expected_total_cents(p.id))
-        finance = build_project_finance(
-            p,
-            expected_total_cents=expected_total_cents,
-            received_settled_income_bank_cents=int(received_cents),
-            broker_paid_cents=broker_paid_cents,
-        )
-        balance_after_by_tx_id = running_settled_cash_balance_by_transaction_id(p.id)
+    expected_total_cents = int(project_expected_total_cents(p.id))
+    finance = build_project_finance(
+        p,
+        expected_total_cents=expected_total_cents,
+        received_settled_income_bank_cents=int(received_cents),
+        broker_paid_cents=broker_paid_cents,
+    )
+    balance_after_by_tx_id = running_settled_cash_balance_by_transaction_id(p.id)
     expected_net_cents = finance["expected_net_cents"]
     received_net_cents = finance["received_net_cents"]
     remaining_gross_cents = finance["remaining_gross_cents"]
@@ -804,20 +812,18 @@ def project_detail(project_id: int):
     # 构建用户ID→名称映射（用于显示项目人员姓名）
     user_name_map = {u.id: u.username for u in User.query.all()}
 
-    # 递归收集所有子孙项目（用于父项目页展示）
-    all_sub_projects = []
-    if is_parent:
-        sub_ids = _collect_all_sub_project_ids(int(p.id))
-        sub_ids.discard(int(p.id))
-        if sub_ids:
-            all_sub_projects = Project.query.filter(Project.id.in_(sub_ids)).order_by(Project.name.asc()).all()
+    child_visible_ids = {
+        int(row.child.id)
+        for row in subcontract_summary.children
+        if is_admin() or _is_project_member(int(row.child.id), int(current_user.id))
+    }
 
     return render_template(
         "project_detail.html",
         project=p,
         leader=leader,
         today=today,
-        all_sub_projects=all_sub_projects,
+        child_visible_ids=child_visible_ids,
         is_parent=is_parent,
         days_total=int(days_total),
         days_elapsed=int(days_elapsed),
@@ -891,6 +897,10 @@ def project_detail(project_id: int):
         fund_pool_form=fund_pool_form,
         fund_transfer_form=fund_transfer_form,
         fund_transfers=fund_transfers,
+        subcontract_summary=subcontract_summary,
+        subcontract_form=subcontract_form,
+        subcontract_settlements=subcontract_settlements,
+        child_contract_info=child_contract_info,
         public_balance_cents=int(fund_balances.public_cents),
         pool_balance_cents=int(fund_balances.pool_cents),
         available_fund_cents=int(fund_balances.total_cents),

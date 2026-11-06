@@ -620,6 +620,13 @@ def _do_delete_project(p: Project) -> None:
         ProjectDividendDistribution.project_id == pid
     ).delete(synchronize_session=False)
 
+    db.session.query(ProjectSubcontractSettlement).filter(
+        db.or_(
+            ProjectSubcontractSettlement.parent_project_id == pid,
+            ProjectSubcontractSettlement.child_project_id == pid,
+        )
+    ).delete(synchronize_session=False)
+
     for transfer in FundTransfer.query.filter_by(project_id=pid).all():
         for fat in FundTransferAttachment.query.filter_by(
             transfer_id=transfer.id

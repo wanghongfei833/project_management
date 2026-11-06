@@ -104,24 +104,21 @@ def _check_project_not_ended(project) -> bool:
 
 
 def _can_view_project(user_id: int, project_id: int) -> bool:
-    """用户是否能查看某个项目（穿透父项目链）。"""
-    visited = set()
-    p = db.session.get(Project, project_id)
-    while p:
-        if p.id in visited:
-            break
-        visited.add(p.id)
-        if _is_project_member(p.id, user_id):
-            return True
-        p = p.parent_project
-    return False
+    """项目权限严格隔离：只允许当前项目成员，父子关系不授予访问权。"""
+    return _is_project_member(int(project_id), int(user_id))
 
 
-def _collect_all_sub_project_ids(project_id: int) -> set[int]:
+def _collect_all_sub_project_ids(
+    project_id: int, _visited: set[int] | None = None
+) -> set[int]:
     """递归收集所有子孙项目的 ID。"""
+    visited = _visited if _visited is not None else set()
+    if project_id in visited:
+        return set()
+    visited.add(project_id)
     ids = {project_id}
     for child in Project.query.filter_by(parent_project_id=project_id).all():
-        ids |= _collect_all_sub_project_ids(int(child.id))
+        ids |= _collect_all_sub_project_ids(int(child.id), visited)
     return ids
 
 

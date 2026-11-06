@@ -18,6 +18,9 @@ def project_dividend_page(project_id: int):
     if p.status != "ended":
         flash("只有已终止的项目才能进行分红", "warning")
         return redirect(url_for("main.project_detail", project_id=p.id))
+    if not p.can_dividend:
+        flash("该项目未启用独立分红", "warning")
+        return redirect(url_for("main.project_detail", project_id=p.id))
 
     # 计算分红数据
     received_cents = int(
@@ -72,6 +75,9 @@ def project_dividend_post(project_id: int):
 
     if p.status != "ended":
         flash("只有已终止的项目才能进行分红", "warning")
+        return redirect(url_for("main.project_detail", project_id=p.id))
+    if not p.can_dividend:
+        flash("该项目未启用独立分红", "warning")
         return redirect(url_for("main.project_detail", project_id=p.id))
 
     # 获取非 admin 成员

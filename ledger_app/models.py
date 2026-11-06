@@ -685,6 +685,61 @@ class FundTransferAttachment(db.Model):
     uploaded_by = db.relationship("User", foreign_keys=[uploaded_by_user_id])
 
 
+class ProjectSubcontractSettlement(db.Model):
+    """主项目向分包项目付款的内部结算，两侧账目严格隔离。"""
+
+    __tablename__ = "project_subcontract_settlements"
+
+    id = db.Column(db.Integer, primary_key=True)
+    parent_project_id = db.Column(
+        db.Integer,
+        db.ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    child_project_id = db.Column(
+        db.Integer,
+        db.ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    parent_transaction_id = db.Column(
+        db.Integer,
+        db.ForeignKey("transactions.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
+    child_transaction_id = db.Column(
+        db.Integer,
+        db.ForeignKey("transactions.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
+    amount_cents = db.Column(db.BigInteger, nullable=False)
+    status = db.Column(
+        db.String(24), nullable=False, default="pending_payment", index=True
+    )
+    note = db.Column(db.Text, nullable=True)
+    created_by_user_id = db.Column(
+        db.Integer, db.ForeignKey("users.id"), nullable=True
+    )
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    paid_at = db.Column(db.DateTime, nullable=True)
+    received_at = db.Column(db.DateTime, nullable=True)
+
+    parent_project = db.relationship(
+        "Project", foreign_keys=[parent_project_id]
+    )
+    child_project = db.relationship("Project", foreign_keys=[child_project_id])
+    parent_transaction = db.relationship(
+        "Transaction", foreign_keys=[parent_transaction_id]
+    )
+    child_transaction = db.relationship(
+        "Transaction", foreign_keys=[child_transaction_id]
+    )
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
+
+
 class TransactionEditApproval(db.Model):
     __tablename__ = "transaction_edit_approvals"
 

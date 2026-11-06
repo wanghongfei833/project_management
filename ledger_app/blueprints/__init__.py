@@ -10,6 +10,6 @@ from flask import Blueprint
 bp = Blueprint("main", __name__)
 
 # 导入即注册路由（顺序无关）
-from . import core, dashboard, users, sms_admin, exports, projects, transactions, lifecycle, dividend_routes, finance, fund_pool_routes  # noqa: E402,F401
+from . import core, dashboard, users, sms_admin, exports, projects, transactions, lifecycle, dividend_routes, finance, fund_pool_routes, subcontract_routes  # noqa: E402,F401
 
 __all__ = ["bp"]

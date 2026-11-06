@@ -244,6 +244,25 @@ class FundPoolSettingsForm(FlaskForm):
     )
 
 
+class SubcontractPaymentForm(FlaskForm):
+    child_project_id = SelectField(
+        "分包项目", coerce=int, validators=[DataRequired()]
+    )
+    amount_yuan = DecimalField(
+        "本次支付金额（元）",
+        places=2,
+        rounding=None,
+        validators=[DataRequired(), NumberRange(min=0.01)],
+    )
+    fund_account = SelectField(
+        "付款账户",
+        choices=[(key, label) for key, label in FUND_ACCOUNT_LABELS.items()],
+        default="public",
+        validators=[DataRequired()],
+    )
+    note = TextAreaField("备注", validators=[Optional(), Length(max=2000)])
+
+
 class ProjectAdjustmentForm(FlaskForm):
     amount_yuan = DecimalField(
         "追加应收（元）", places=2, rounding=None, validators=[DataRequired(), NumberRange(min=0.01)]

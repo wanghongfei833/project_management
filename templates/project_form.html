@@ -21,7 +21,7 @@
         <label class="form-label">允许分红</label>
         {{ form.can_dividend(class="form-select") }}
         <div class="form-text" id="dividend_hint">
-          选择「否」时：项目利润自动回流到父项目，该项目无分红入口。
+          父子项目财务独立。选择「否」时仅关闭当前项目的独立分红入口，不会自动修改主项目利润。
         </div>
       </div>
 
@@ -173,7 +173,7 @@
         dw.style.display = hasParent ? '' : 'none';
         if (hasParent) {
           var sel = document.getElementById('can_dividend');
-          if (sel) sel.value = '2';
+          if (sel) sel.value = '1';
         }
       }
 

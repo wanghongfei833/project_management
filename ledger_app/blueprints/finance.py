@@ -88,6 +88,17 @@ def finance_pay(transaction_id: int):
         flash("实付金额必须大于 0", "warning")
         return redirect(url_for("main.finance_page", focus=tx.id))
 
+    settlement = ProjectSubcontractSettlement.query.filter_by(
+        parent_transaction_id=int(tx.id),
+        status="pending_payment",
+    ).first()
+    if settlement is not None and paid_cents != int(settlement.amount_cents):
+        flash(
+            "内部结算必须按申请金额一次付款；如需调整金额，请先取消并重新发起。",
+            "warning",
+        )
+        return redirect(url_for("main.finance_page", focus=tx.id))
+
     method = (request.form.get("payment_method") or "银行转账").strip()[:32]
     note = (request.form.get("pay_note") or "").strip()
     requested_account = (request.form.get("fund_account") or "").strip()
@@ -104,6 +115,8 @@ def finance_pay(transaction_id: int):
     tx.payment_status = PAYMENT_PAID
     if note:
         tx.note = (tx.note + f"\n[打款] {note}") if tx.note else f"[打款] {note}"
+    if settlement is not None:
+        settle_subcontract_amount(settlement, tx.paid_at)
     closed_now = _mark_closed_if_receipted(tx)
     _log_project_activity(
         int(tx.project_id),
@@ -173,6 +186,12 @@ def finance_reject(transaction_id: int):
     req = _open_transaction_create_request(int(tx.id))
     if req:
         req.status = "rejected"
+    settlement = ProjectSubcontractSettlement.query.filter_by(
+        parent_transaction_id=int(tx.id),
+        status="pending_payment",
+    ).first()
+    if settlement is not None:
+        settlement.status = "cancelled"
     _log_project_activity(
         int(tx.project_id),
         "payment.reject",
@@ -205,6 +224,12 @@ def finance_confirm_income(transaction_id: int):
     tx.paid_by_user_id = int(current_user.id)
     tx.payment_status = PAYMENT_PAID
     _mark_closed_if_receipted(tx)
+    settlement = ProjectSubcontractSettlement.query.filter_by(
+        child_transaction_id=int(tx.id),
+        status="pending_receipt",
+    ).first()
+    if settlement is not None:
+        mark_subcontract_received(settlement, utcnow())
     _log_project_activity(
         int(tx.project_id),
         "payment.income_confirm",

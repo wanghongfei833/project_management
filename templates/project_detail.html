@@ -5,7 +5,7 @@
     <div>
       <h1 class="h4 mb-1">{{ project.name }}</h1>
       <div class="text-muted small">状态：{% if project.status == 'ended' %}<span class="text-danger fw-bold">已终止</span>{% elif project.status == 'open' %}进行中{% else %}已结束{% endif %}
-        {% if project.sub_projects %}<span class="badge text-bg-secondary ms-1" style="font-size:.65rem;">{{ all_sub_projects|length + project.sub_projects|length }} 个子项目</span>{% endif %}
+        {% if project.sub_projects %}<span class="badge text-bg-secondary ms-1" style="font-size:.65rem;">{{ project.sub_projects|length }} 个直接分包项目</span>{% endif %}
       </div>
     </div>
     <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -198,6 +198,7 @@
         </div>
       </div>
 
+  {% include "_subcontracts.html" %}
   {% include "_fund_pool.html" %}
 
   <!-- 修改结束日期模态框 -->

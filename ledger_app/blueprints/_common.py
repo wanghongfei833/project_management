@@ -55,6 +55,7 @@ from ..forms import (
     ProjectEndDateChangeForm,
     ProjectForm,
     ProjectUpdateForm,
+    SubcontractPaymentForm,
     TransactionEditForm,
     TransactionForm,
     UserCreateForm,
@@ -82,6 +83,7 @@ from ..models import (
     ProjectFundPool,
     ProjectReviveApproval,
     ProjectReviveRequest,
+    ProjectSubcontractSettlement,
     ProjectUpdate,
     ProjectUpdateAttachment,
     Role,
@@ -124,6 +126,7 @@ from ..services.projects import *  # noqa: F401,F403
 from ..services.money import *  # noqa: F401,F403
 from ..services.attachments import *  # noqa: F401,F403
 from ..services.fund_pool import *  # noqa: F401,F403
+from ..services.subcontracts import *  # noqa: F401,F403
 
 # 蓝图对象：所有路由都注册在名为 main 的蓝图里，url_for('main.xxx') 保持不变
 from . import bp  # noqa: E402,F401
