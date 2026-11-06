@@ -1900,6 +1900,50 @@ class TestLogicAuditFixes:
         assert "1,234.00" in html       # 已到账 → 计入
         assert "5,678.00" not in html   # 未到账 → 不计入
 
+    def test_earnings_can_include_open_projects(self, client):
+        seed = get_seed()
+        si = _db.session.get(User, seed["users"]["si"])
+        p = Project(
+            name="ProjOpenIncome",
+            expected_income_cents=0,
+            broker_fee_mode="percent",
+            broker_fee_direction="we_pay_separate",
+            referral_ratio=Decimal("0"),
+            status="open",
+            leader_user_id=si.id,
+            planned_start_date=date(2026, 1, 1),
+            planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        _db.session.add(
+            Transaction(
+                project_id=p.id,
+                status="active",
+                type="expense",
+                amount_cents=1_234_567,
+                occur_date=date.today(),
+                settled=True,
+                fund_account=FundAccount.PUBLIC.value,
+                counterparty="项目人员",
+                recipient_user_id=si.id,
+                created_by_user_id=seed["users"]["admin"],
+            )
+        )
+        _db.session.commit()
+
+        login(client, "si")
+        excluded = client.get(
+            "/earnings?start=2026-01-01&end=2026-12-31"
+        ).get_data(as_text=True)
+        assert "12,345.67" not in excluded
+        assert "包含进行中项目的收入" in excluded
+
+        included = client.get(
+            "/earnings?start=2026-01-01&end=2026-12-31&include_open=1"
+        ).get_data(as_text=True)
+        assert "12,345.67" in included
+
     def test_project_form_ended_status_sets_ended_at(self, client):
         """编辑页选「已结束」要写成 ended + ended_at，而不是系统不认的 closed。"""
         seed = get_seed()

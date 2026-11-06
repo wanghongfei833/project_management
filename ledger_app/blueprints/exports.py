@@ -269,6 +269,7 @@ def personal_earnings():
     """
     is_admin_user = is_admin()
     target_user_id = request.args.get("user_id", type=int)
+    include_open_projects = request.args.get("include_open") == "1"
 
     start_d, end_d = _earnings_range_from_request(request.args)
     # 用户填的是「北京时间」的日期，而 ended_at 存的是 naive UTC，所以边界要回推 8 小时；
@@ -296,7 +297,7 @@ def personal_earnings():
     for u in users_q:
         tx_payments = (
             db.session.query(Transaction.project_id,
-                db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+                db.func.coalesce(db.func.sum(expense_cash_expr()), 0))
             .filter(Transaction.recipient_user_id == u.id, Transaction.is_void.is_(False),
                     Transaction.status == "active", Transaction.settled.is_(True),
                     Transaction.type == "expense")
@@ -322,12 +323,14 @@ def personal_earnings():
             if not p:
                 continue
             if ranged:
-                if p.ended_at is None:
-                    continue
-                if lo is not None and p.ended_at < lo:
-                    continue
-                if hi is not None and p.ended_at >= hi:
-                    continue
+                    if p.ended_at is None:
+                        if not include_open_projects:
+                            continue
+                    else:
+                        if lo is not None and p.ended_at < lo:
+                            continue
+                        if hi is not None and p.ended_at >= hi:
+                            continue
             pd.append({"project_name": p.name, "payment": vals["payment"], "dividend": vals["dividend"]})
             tp += vals["payment"]; td += vals["dividend"]
         rows.append({"user": u, "projects": pd, "total_payment": tp, "total_dividend": td, "grand_total": tp + td})
@@ -338,6 +341,7 @@ def personal_earnings():
         start=start_d.isoformat() if start_d else "",
         end=end_d.isoformat() if end_d else "",
         ranged=ranged,
+        include_open_projects=include_open_projects,
         selected_user_id=target_user_id,
     )
 

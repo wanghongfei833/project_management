@@ -13,7 +13,7 @@
         </button>
         <ul class="dropdown-menu dropdown-menu-end">
           {% for u in rows|map(attribute='user') %}
-            <li><a class="dropdown-item" href="{{ url_for('main.personal_earnings', user_id=u.id, start=start, end=end) }}">{{ u.username }}</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('main.personal_earnings', user_id=u.id, start=start, end=end, include_open=1 if include_open_projects else none) }}">{{ u.username }}</a></li>
           {% endfor %}
         </ul>
       </div>
@@ -22,6 +22,15 @@
 
   <form class="row g-2 align-items-end mb-2" method="get">
     {% if selected_user_id %}<input type="hidden" name="user_id" value="{{ selected_user_id }}">{% endif %}
+    <div class="col-12">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" name="include_open" value="1" id="include_open_projects"
+               {% if include_open_projects %}checked{% endif %}>
+        <label class="form-check-label small" for="include_open_projects">
+          包含进行中项目的收入（进行中项目不受终止日期筛选）
+        </label>
+      </div>
+    </div>
     <div class="col-sm-6 col-md-3">
       <label class="form-label small text-muted">项目终止日期（起）</label>
       <input class="form-control form-control-sm" type="date" name="start" value="{{ start }}">
@@ -34,11 +43,12 @@
       <button class="btn btn-sm btn-primary" type="submit">查询</button>
     </div>
     <div class="col-auto">
-      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.personal_earnings', user_id=selected_user_id, all=1) }}">不限时间</a>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.personal_earnings', user_id=selected_user_id, all=1, include_open=1 if include_open_projects else none) }}">不限时间</a>
     </div>
   </form>
   <div class="text-muted small mb-3">
-    按<b>项目实际终止时间</b>筛选{% if ranged %}（当前范围：{{ start or '不限' }} ~ {{ end or '不限' }}）{% endif %}；未终止的项目只在「不限时间」时统计。
+    按<b>项目实际终止时间</b>筛选{% if ranged %}（当前范围：{{ start or '不限' }} ~ {{ end or '不限' }}）{% endif %}；
+    {% if include_open_projects %}进行中项目已包含在统计中。{% else %}未终止项目默认不统计，可勾选「包含进行中项目的收入」。{% endif %}
   </div>
 
   {% for row in rows %}
