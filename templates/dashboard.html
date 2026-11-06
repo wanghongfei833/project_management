@@ -93,7 +93,39 @@
       <div class="card">
         <div class="card-body">
           <div class="fw-semibold">进行中项目未回款（Top10，按我方净额）</div>
-          <canvas id="chart-projects" height="120"></canvas>
+          <div class="small text-muted mb-2">仅显示未回款大于 0 的项目；父项目已合并关联项目金额，不重复计算。</div>
+          {% if top_projects %}
+            <div style="max-height: 310px; overflow-y: auto;">
+              {% for row in top_projects %}
+                {% set pct = (row.received_net_cents / row.expected_net_cents * 100)|int if row.expected_net_cents > 0 else 0 %}
+                {% set pct = [pct, 100]|min %}
+                <div class="py-2 border-bottom" data-unpaid-project-id="{{ row.project.id }}">
+                  <div class="d-flex justify-content-between align-items-center gap-3">
+                    <div class="d-flex align-items-center gap-2" style="min-width: 0;">
+                      <span class="badge text-bg-light border rounded-pill">{{ loop.index }}</span>
+                      <a class="text-decoration-none fw-semibold text-truncate" href="{{ url_for('main.project_detail', project_id=row.project.id) }}" title="{{ row.project.name }}">
+                        {{ row.project.name }}
+                      </a>
+                      {% if row.has_linked_projects %}
+                        <span class="badge text-bg-info text-nowrap">含关联项目</span>
+                      {% endif %}
+                    </div>
+                    <span class="fw-bold text-danger text-nowrap">¥ {{ row.remaining_net_cash_cents|money }}</span>
+                  </div>
+                  <div class="d-flex align-items-center gap-2 mt-1 ps-4">
+                    <div class="progress flex-grow-1" style="height: 5px;">
+                      <div class="progress-bar {% if pct >= 100 %}bg-success{% elif pct >= 50 %}bg-primary{% else %}bg-warning{% endif %}" role="progressbar" style="width: {{ pct }}%;"></div>
+                    </div>
+                    <span class="small text-muted text-nowrap">已收净 ¥ {{ row.received_net_cents|money }} / {{ pct }}%</span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-success small py-4 text-center">
+              <i class="bi bi-check-circle me-1"></i>当前进行中项目没有未回款
+            </div>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -266,24 +298,6 @@
       responsive: true,
       plugins: { legend: { display: false } },
       scales: { y: { beginAtZero: true } }
-    }
-  });
-
-  const proj = {{ chart_projects_json|safe }};
-  new Chart(document.getElementById('chart-projects'), {
-    type: 'bar',
-    data: {
-      labels: proj.labels,
-      datasets: [{
-        label: '我方未收净额（元，剩余应收 − 还欠中介）',
-        data: proj.remaining_cash,
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { display: false } },
-      indexAxis: 'y',
-      scales: { x: { beginAtZero: true } }
     }
   });
 </script>

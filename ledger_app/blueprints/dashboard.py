@@ -167,6 +167,7 @@ def dashboard():
             "finance": fin,
             "dividend_paid": div_paid,
             "dividend_remaining": div_remaining,
+            "has_linked_projects": bool(link_summary.children),
         }
         if p.status == "ended":
             ended_rows.append(row)
@@ -197,12 +198,6 @@ def dashboard():
     ended_total_div_paid = sum(r["dividend_paid"] for r in ended_rows)
     ended_total_div_remaining = sum(r["dividend_remaining"] for r in ended_rows)
 
-    # chart: 按「我方未收净额」排序（仅进行中项目）
-    top_projects = sorted(
-        active_rows,
-        key=lambda r: r["remaining_net_cash_cents"], reverse=True
-    )[:10]
-
     active_row_by_project_id = {
         int(row["project"].id): row for row in active_rows
     }
@@ -215,12 +210,23 @@ def dashboard():
     for item in project_tree_rows:
         item["row"] = active_row_by_project_id.get(int(item["project"].id))
 
-    chart_projects = {
-        "labels": [r["project"].name for r in top_projects],
-        "remaining": [int(r["remaining_net_cents"]) / 100 for r in top_projects],
-        "remaining_cash": [int(r["remaining_net_cash_cents"]) / 100 for r in top_projects],
-        "received": [int(r["received_net_cents"]) / 100 for r in top_projects],
+    # Top10 只列出项目树的根节点，父项目已经合并关联项目金额时不再重复列出子项目；
+    # 同时过滤未回款为 0 的项目，避免空柱和重复柱造成误读。
+    root_project_ids = {
+        int(item["project"].id)
+        for item in project_tree_rows
+        if int(item["depth"]) == 0 and item.get("row")
     }
+    top_projects = sorted(
+        (
+            row
+            for row in active_rows
+            if int(row["project"].id) in root_project_ids
+            and int(row["remaining_net_cash_cents"]) > 0
+        ),
+        key=lambda row: int(row["remaining_net_cash_cents"]),
+        reverse=True,
+    )[:10]
 
     # 可分配盈余：全部项目利润合计（不含分红支出）
     surplus_cents = sum(
@@ -247,7 +253,7 @@ def dashboard():
         surplus_cents=int(surplus_cents),
         project_rows=active_rows,
         project_tree_rows=project_tree_rows,
-        chart_projects_json=json.dumps(chart_projects, ensure_ascii=False),
+        top_projects=top_projects,
         active_count=active_count,
         ended_count=ended_count,
         ended_rows=ended_rows,

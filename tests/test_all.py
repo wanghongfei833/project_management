@@ -203,6 +203,21 @@ class TestDashboard:
         rv = client.get("/")
         assert rv.status_code == 200
 
+    def test_unpaid_top10_uses_root_projects_without_duplicate_children(self, client):
+        login(client, "admin", "admin123!")
+        rv = client.get("/")
+        assert rv.status_code == 200
+        html = rv.get_data(as_text=True)
+        seed = get_seed()
+        parent_id = seed["projects"]["A"]
+        child_ids = [seed["projects"]["A1"], seed["projects"]["A2"]]
+
+        assert f'data-unpaid-project-id="{parent_id}"' in html
+        assert all(
+            f'data-unpaid-project-id="{child_id}"' not in html
+            for child_id in child_ids
+        )
+
 
 class TestParentChild:
     def test_create_child_project(self, client):
