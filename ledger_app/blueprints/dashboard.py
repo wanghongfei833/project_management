@@ -89,13 +89,11 @@ def dashboard():
     expense_cents = expense_q.scalar()
 
     projects = _accessible_projects_query().order_by(Project.id.desc()).all()
-    visible_project_ids = {int(p.id) for p in projects}
     project_links = (
         ProjectLink.query.filter_by(status="active")
         .order_by(ProjectLink.id.asc())
         .all()
     )
-    project_tree_rows = _visible_project_tree(projects, project_links)
     # 各项目「实际已付中介费」（一次查完，避免逐个项目查库）
     broker_paid_by_project = {
         int(pid): int(total or 0)
@@ -204,22 +202,24 @@ def dashboard():
         key=lambda r: r["remaining_net_cash_cents"], reverse=True
     )[:10]
 
+    active_row_by_project_id = {
+        int(row["project"].id): row for row in active_rows
+    }
+    active_projects = [row["project"] for row in active_rows]
+    project_tree_rows = [
+        item
+        for item in _visible_project_tree(active_projects, project_links)
+        if item["project"].status != "ended"
+    ]
+    for item in project_tree_rows:
+        item["row"] = active_row_by_project_id.get(int(item["project"].id))
+
     chart_projects = {
         "labels": [r["project"].name for r in top_projects],
         "remaining": [int(r["remaining_net_cents"]) / 100 for r in top_projects],
         "remaining_cash": [int(r["remaining_net_cash_cents"]) / 100 for r in top_projects],
         "received": [int(r["received_net_cents"]) / 100 for r in top_projects],
     }
-
-    list_per_page = 15
-    list_page = request.args.get("page", 1, type=int) or 1
-    list_page = max(list_page, 1)
-    list_total = len(active_rows)
-    list_pages = max((list_total + list_per_page - 1) // list_per_page, 1) if list_total else 1
-    if list_page > list_pages:
-        list_page = list_pages
-    start = (list_page - 1) * list_per_page
-    active_rows_page = active_rows[start : start + list_per_page]
 
     # 可分配盈余：全部项目利润合计（不含分红支出）
     surplus_cents = sum(
@@ -244,15 +244,8 @@ def dashboard():
         expense_cents=int(expense_cents),
         net_cents=int(income_cents) - int(expense_cents),
         surplus_cents=int(surplus_cents),
-        project_rows=active_rows_page,
+        project_rows=active_rows,
         project_tree_rows=project_tree_rows,
-        list_page=list_page,
-        list_pages=list_pages,
-        list_total=list_total,
-        list_has_prev=list_page > 1,
-        list_has_next=list_page < list_pages,
-        list_prev_page=list_page - 1,
-        list_next_page=list_page + 1,
         chart_projects_json=json.dumps(chart_projects, ensure_ascii=False),
         active_count=active_count,
         ended_count=ended_count,

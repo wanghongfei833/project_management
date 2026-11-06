@@ -99,51 +99,6 @@
     </div>
   </div>
 
-  <div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <span class="fw-semibold"><i class="bi bi-diagram-3 me-2"></i>项目关系</span>
-      <span class="small text-muted">只展示当前账号可见项目</span>
-    </div>
-    <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0">
-        <thead><tr><th>项目</th><th>状态</th><th class="text-end">项目总应收</th><th>访问</th></tr></thead>
-        <tbody>
-          {% for item in project_tree_rows %}
-            <tr>
-              <td>
-                <span style="display:inline-block;width:{{ item.depth * 24 }}px;"></span>
-                {% if item.prefix %}<span class="text-muted">{{ item.prefix }}</span>{% endif %}
-                {% if item.accessible %}
-                  <a class="text-decoration-none fw-semibold" href="{{ url_for('main.project_detail', project_id=item.project.id) }}">{{ item.project.name }}</a>
-                {% else %}
-                  <span class="text-muted">{{ item.project.name }}</span>
-                {% endif %}
-                {% if item.is_parent %}<span class="badge text-bg-light border ms-1">含关联项目</span>{% endif %}
-              </td>
-              <td>
-                {% if item.project.status == 'ended' %}
-                  <span class="badge text-bg-secondary">已终止</span>
-                {% else %}
-                  <span class="badge text-bg-success-subtle text-success border-success-subtle">进行中</span>
-                {% endif %}
-              </td>
-              <td class="text-end">
-                {% if item.accessible %}¥ {{ item.receivable_cents|money }}{% else %}—{% endif %}
-              </td>
-              <td class="small">
-                {% if item.accessible %}
-                  <span class="text-success">可查看账务</span>
-                {% else %}
-                  <span class="text-muted"><i class="bi bi-lock me-1"></i>仅关联信息</span>
-                {% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
   <h2 class="h6" style="color: var(--brand-primary);"><i class="bi bi-activity me-2"></i>进行中项目</h2>
   <div class="text-muted small mb-2">
  合同金额统一为客户合同总价；「中介先扣」项目的收入流水通常记我方净额（中介已扣），「我方另付」项目收入流水通常记客户全额。<strong>未收净额＝剩余应收 − 还欠中介费</strong>（中介已付清时就等于剩余应收）。
@@ -162,27 +117,43 @@
         </tr>
       </thead>
       <tbody>
-        {% for row in project_rows %}
-          {% set pct = (row.received_net_cents / row.expected_net_cents * 100)|int if row.expected_net_cents > 0 else 0 %}
+        {% for item in project_tree_rows %}
+          {% set row = item.row %}
+          {% set pct = (row.received_net_cents / row.expected_net_cents * 100)|int if row and row.expected_net_cents > 0 else 0 %}
           {% set pct = [pct, 100]|min %}
           <tr>
-            <td><span class="fw-semibold">{{ row.project.name }}</span></td>
-            <td class="text-end">¥ {{ row.expected_net_cents|money }}</td>
-            <td class="text-end">¥ {{ row.received_cents|money }}</td>
-            <td class="text-end">¥ {{ row.received_net_cents|money }}</td>
-            <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">¥ {{ row.remaining_net_cash_cents|money }}</td>
             <td>
+              <span style="display:inline-block;width:{{ item.depth * 24 }}px;"></span>
+              {% if item.prefix %}<span class="text-muted">{{ item.prefix }}</span>{% endif %}
+              {% if item.accessible %}
+                <a class="fw-semibold text-decoration-none" href="{{ url_for('main.project_detail', project_id=item.project.id) }}">{{ item.project.name }}</a>
+              {% else %}
+                <span class="text-muted">{{ item.project.name }}</span>
+                <span class="badge text-bg-light border ms-1"><i class="bi bi-lock me-1"></i>无账务权限</span>
+              {% endif %}
+            </td>
+            <td class="text-end">{% if row %}¥ {{ row.expected_net_cents|money }}{% else %}—{% endif %}</td>
+            <td class="text-end">{% if row %}¥ {{ row.received_cents|money }}{% else %}—{% endif %}</td>
+            <td class="text-end">{% if row %}¥ {{ row.received_net_cents|money }}{% else %}—{% endif %}</td>
+            <td class="text-end fw-bold text-danger" style="font-size: 1.05rem;">{% if row %}¥ {{ row.remaining_net_cash_cents|money }}{% else %}—{% endif %}</td>
+            <td>
+              {% if row %}
               <div class="d-flex align-items-center gap-2">
                 <div class="progress flex-grow-1" style="height: 6px;">
                   <div class="progress-bar {% if pct >= 100 %}bg-success{% elif pct >= 50 %}bg-primary{% else %}bg-warning{% endif %}" role="progressbar" style="width: {{ pct }}%;"></div>
                 </div>
                 <span class="small text-muted text-nowrap">{{ pct }}%</span>
               </div>
+              {% else %}
+                <span class="small text-muted">仅关联信息</span>
+              {% endif %}
             </td>
             <td class="text-end">
-              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=row.project.id) }}">查看</a>
-              {% if is_admin and row.project.status != 'ended' %}
-                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=row.project.id) }}">编辑</a>
+              {% if item.accessible %}
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_detail', project_id=item.project.id) }}">查看</a>
+              {% if is_admin and item.project.status != 'ended' %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=item.project.id) }}">编辑</a>
+              {% endif %}
               {% endif %}
             </td>
           </tr>
@@ -192,24 +163,6 @@
       </tbody>
     </table>
   </div>
-
-  {% if list_pages > 1 %}
-    <nav class="mt-2 mb-4" aria-label="项目列表分页">
-      <ul class="pagination pagination-sm justify-content-center mb-0">
-        {% if list_has_prev %}
-          <li class="page-item"><a class="page-link" href="{{ url_for('main.dashboard', page=list_prev_page) }}">上一页</a></li>
-        {% else %}
-          <li class="page-item disabled"><span class="page-link">上一页</span></li>
-        {% endif %}
-        <li class="page-item disabled"><span class="page-link">{{ list_page }} / {{ list_pages }}（共 {{ list_total }} 条）</span></li>
-        {% if list_has_next %}
-          <li class="page-item"><a class="page-link" href="{{ url_for('main.dashboard', page=list_next_page) }}">下一页</a></li>
-        {% else %}
-          <li class="page-item disabled"><span class="page-link">下一页</span></li>
-        {% endif %}
-      </ul>
-    </nav>
-  {% endif %}
 
   {% if ended_rows %}
     <div class="card mb-4">

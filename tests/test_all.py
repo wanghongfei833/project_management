@@ -283,7 +283,7 @@ class TestParentChild:
         seed = get_seed()
         login(client, "wang")
         html = client.get("/").get_data(as_text=True)
-        assert "项目关系" in html
+        assert "进行中项目" in html
         assert "ProjA1" in html
         assert "ProjA2" in html
         assert "仅关联信息" in html
