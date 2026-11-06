@@ -255,6 +255,7 @@
       if (e.target.closest(".upload-thumb") || e.target.closest("button")) return;
       input.click();
     });
+    zone.addEventListener("focus", activate);
     if (chooseBtn) chooseBtn.addEventListener("click", function () {
       activate();
       input.click();

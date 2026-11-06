@@ -146,7 +146,7 @@
               <div class="col-12">
                 {% from "_upload.html" import upload_field %}
                 <label class="form-label">划转凭证</label>
-                {{ upload_field("attachments_fund_transfer", "可上传银行流水、工资单或转账截图。") }}
+                {{ upload_field("attachments_fund_transfer", "可上传银行流水、工资单或转账截图。", true) }}
               </div>
             </div>
           </div>
@@ -187,4 +187,13 @@
       </div>
     </div>
   </div>
+
+  <script>
+  document.addEventListener("shown.bs.modal", function (event) {
+    if (event.target && event.target.id === "fundTransferModal") {
+      var zone = document.getElementById("attachments_fund_transfer-zone");
+      if (zone) zone.focus();
+    }
+  });
+  </script>
 {% endif %}
