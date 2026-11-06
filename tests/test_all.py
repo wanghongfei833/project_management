@@ -1896,7 +1896,7 @@ class TestLogicAuditFixes:
         _db.session.commit()
 
         login(client, "si")
-        html = client.get("/earnings?all=1").get_data(as_text=True)
+        html = client.get("/earnings?all=1&include_open=1").get_data(as_text=True)
         assert "1,234.00" in html       # 已到账 → 计入
         assert "5,678.00" not in html   # 未到账 → 不计入
 
@@ -1944,6 +1944,14 @@ class TestLogicAuditFixes:
         ).get_data(as_text=True)
         assert "12,345.67" in included
         assert "已额外包含" in included and "个进行中项目" in included
+
+        unlimited_excluded = client.get("/earnings?all=1").get_data(as_text=True)
+        assert "12,345.67" not in unlimited_excluded
+        unlimited_included = client.get(
+            "/earnings?all=1&include_open=1"
+        ).get_data(as_text=True)
+        assert "12,345.67" in unlimited_included
+        assert "已额外包含" in unlimited_included
 
     def test_project_form_ended_status_sets_ended_at(self, client):
         """编辑页选「已结束」要写成 ended + ended_at，而不是系统不认的 closed。"""

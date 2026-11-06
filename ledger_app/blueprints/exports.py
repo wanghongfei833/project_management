@@ -323,16 +323,15 @@ def personal_earnings():
             p = db.session.get(Project, pid)
             if not p:
                 continue
-            if ranged:
-                    if p.ended_at is None:
-                        if not include_open_projects:
-                            continue
-                        included_open_project_ids.add(int(p.id))
-                    else:
-                        if lo is not None and p.ended_at < lo:
-                            continue
-                        if hi is not None and p.ended_at >= hi:
-                            continue
+            if p.ended_at is None:
+                if not include_open_projects:
+                    continue
+                included_open_project_ids.add(int(p.id))
+            elif ranged:
+                if lo is not None and p.ended_at < lo:
+                    continue
+                if hi is not None and p.ended_at >= hi:
+                    continue
             pd.append({"project_name": p.name, "payment": vals["payment"], "dividend": vals["dividend"]})
             tp += vals["payment"]; td += vals["dividend"]
         rows.append({"user": u, "projects": pd, "total_payment": tp, "total_dividend": td, "grand_total": tp + td})
