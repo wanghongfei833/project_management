@@ -1943,6 +1943,7 @@ class TestLogicAuditFixes:
             "/earnings?start=2026-01-01&end=2026-12-31&include_open=1"
         ).get_data(as_text=True)
         assert "12,345.67" in included
+        assert "已额外包含" in included and "个进行中项目" in included
 
     def test_project_form_ended_status_sets_ended_at(self, client):
         """编辑页选「已结束」要写成 ended + ended_at，而不是系统不认的 closed。"""

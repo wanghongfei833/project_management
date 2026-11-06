@@ -294,6 +294,7 @@ def personal_earnings():
     else:
         users_q = User.query.filter(User.id == current_user.id).all()
     rows = []
+    included_open_project_ids: set[int] = set()
     for u in users_q:
         tx_payments = (
             db.session.query(Transaction.project_id,
@@ -326,6 +327,7 @@ def personal_earnings():
                     if p.ended_at is None:
                         if not include_open_projects:
                             continue
+                        included_open_project_ids.add(int(p.id))
                     else:
                         if lo is not None and p.ended_at < lo:
                             continue
@@ -342,6 +344,7 @@ def personal_earnings():
         end=end_d.isoformat() if end_d else "",
         ranged=ranged,
         include_open_projects=include_open_projects,
+        included_open_project_count=len(included_open_project_ids),
         selected_user_id=target_user_id,
     )
 
