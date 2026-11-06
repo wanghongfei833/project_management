@@ -60,6 +60,7 @@ def finance_page():
         pay_methods=PAY_METHODS,
         focus=request.args.get("focus", type=int),
         status_label=payment_status_label,
+        fund_account_label=fund_account_label,
     )
 
 
@@ -89,6 +90,12 @@ def finance_pay(transaction_id: int):
 
     method = (request.form.get("payment_method") or "银行转账").strip()[:32]
     note = (request.form.get("pay_note") or "").strip()
+    requested_account = (request.form.get("fund_account") or "").strip()
+    if requested_account in {
+        FundAccount.PUBLIC.value,
+        FundAccount.POOL.value,
+    }:
+        tx.fund_account = requested_account
     tx.settled = True
     tx.paid_amount_cents = int(paid_cents)
     tx.paid_at = utcnow()
@@ -102,6 +109,7 @@ def finance_pay(transaction_id: int):
         int(tx.project_id),
         "payment.pay",
         f"财务打款 ¥{format_cents(paid_cents)}（申请 ¥{format_cents(int(tx.amount_cents))}，{method}）"
+        f"，付款账户：{fund_account_label(tx.fund_account)}"
         + ("，凭证已齐 → 闭环" if closed_now else "，待补回单"),
         detail=f"transaction_id={tx.id}",
     )
@@ -201,6 +209,7 @@ def finance_confirm_income(transaction_id: int):
         int(tx.project_id),
         "payment.income_confirm",
         f"确认到账 ¥{format_cents(int(tx.amount_cents))}"
+        f"，到账账户：{fund_account_label(tx.fund_account)}"
         + ("，凭证已齐 → 闭环" if tx.payment_status == PAYMENT_CLOSED else "，待补回单"),
         detail=f"transaction_id={tx.id}",
     )

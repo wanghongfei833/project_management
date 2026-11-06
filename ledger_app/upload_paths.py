@@ -63,3 +63,11 @@ def project_update_attachment_relpath(
     suffix = attachment_disk_suffix(display_name)
     d = digest_hex[:16]
     return f"projects/{int(project_id)}/updates/u{int(update_id)}_{d}{suffix}"
+
+
+def fund_transfer_attachment_relpath(
+    project_id: int, transfer_id: int, digest_hex: str, display_name: str
+) -> str:
+    suffix = attachment_disk_suffix(display_name)
+    d = digest_hex[:16]
+    return f"projects/{int(project_id)}/fund-transfers/ft{int(transfer_id)}_{d}{suffix}"

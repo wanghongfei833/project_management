@@ -4,7 +4,7 @@
 检查项：
   1. SQLite integrity_check / foreign_key_check
   2. 各表行数，并与 manifest.json（服务器端生成）逐表比对
-  3. attachments / project_update_attachments 登记的 stored_path 是否都存在于 uploads/
+  3. 所有附件表登记的 stored_path 是否都存在于 uploads/
   4. uploads/ 下未被任何附件记录引用的文件（孤儿文件，仅报告）
   5. manifest.json 记录的 db 与每个附件的 sha256 是否与本地一致（传输完整性）
 
@@ -29,7 +29,11 @@ from pathlib import Path
 CHUNK = 1024 * 1024
 
 # 登记附件的表 -> 指向 uploads 的相对路径列
-ATTACHMENT_TABLES = ("attachments", "project_update_attachments")
+ATTACHMENT_TABLES = (
+    "attachments",
+    "project_update_attachments",
+    "fund_transfer_attachments",
+)
 
 
 class Report:

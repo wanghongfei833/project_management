@@ -170,5 +170,18 @@ def uploads(filename: str):
             )
         abort(403)
 
+    fta = FundTransferAttachment.query.filter_by(stored_path=filename).first()
+    if fta:
+        transfer = db.session.get(FundTransfer, fta.transfer_id)
+        if (
+            transfer
+            and transfer.project_id
+            and _is_project_member(int(transfer.project_id), current_user.id)
+        ):
+            return send_from_directory(
+                current_app.config["UPLOAD_FOLDER"], filename, as_attachment=False
+            )
+        abort(403)
+
     abort(403)
 

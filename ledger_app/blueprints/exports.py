@@ -115,11 +115,12 @@ def export_transactions_csv():
                 (t.created_by.username if t.created_by else ""),
                 t.note or "",
                 str(len(t.attachments)) if t.attachments else "0",
+                fund_account_label(t.fund_account),
             ]
         )
     header = [
         "日期", "项目", "类型", "金额(元)", "到账", "状态",
-        "对方", "项目人员", "发起人", "备注", "凭证数",
+        "对方", "项目人员", "发起人", "备注", "凭证数", "资金账户",
     ]
     return _csv_response(header, rows, f"transactions-{date.today():%Y%m%d}.csv")
 

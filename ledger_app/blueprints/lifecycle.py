@@ -620,6 +620,20 @@ def _do_delete_project(p: Project) -> None:
         ProjectDividendDistribution.project_id == pid
     ).delete(synchronize_session=False)
 
+    for transfer in FundTransfer.query.filter_by(project_id=pid).all():
+        for fat in FundTransferAttachment.query.filter_by(
+            transfer_id=transfer.id
+        ).all():
+            try:
+                (Path(upload_root) / fat.stored_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+            db.session.delete(fat)
+        db.session.delete(transfer)
+    pool = ProjectFundPool.query.filter_by(project_id=pid).first()
+    if pool:
+        db.session.delete(pool)
+
     for t in txs:
         atts = Attachment.query.filter_by(transaction_id=t.id).all()
         for a in atts:

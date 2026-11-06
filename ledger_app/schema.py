@@ -918,9 +918,149 @@ def _migration_0002_payment_workflow() -> None:
     db.session.commit()
 
 
+def _migration_0003_fund_pool() -> None:
+    """资金账户与项目资金池：历史流水默认归入对公账户。"""
+    if _table_exists("transactions") and not _column_exists(
+        "transactions", "fund_account"
+    ):
+        db.session.execute(
+            text(
+                "ALTER TABLE transactions ADD COLUMN fund_account "
+                "VARCHAR(16) NOT NULL DEFAULT 'public'"
+            )
+        )
+    if _table_exists("transactions"):
+        db.session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_transactions_fund_account "
+                "ON transactions (fund_account)"
+            )
+        )
+
+    if _table_exists("transaction_edit_requests") and not _column_exists(
+        "transaction_edit_requests", "new_fund_account"
+    ):
+        db.session.execute(
+            text(
+                "ALTER TABLE transaction_edit_requests ADD COLUMN "
+                "new_fund_account VARCHAR(16) NOT NULL DEFAULT 'public'"
+            )
+        )
+
+    if not _table_exists("project_fund_pools"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE project_fund_pools (
+                  id INTEGER PRIMARY KEY,
+                  project_id INTEGER NOT NULL UNIQUE,
+                  name VARCHAR(128) NOT NULL DEFAULT '项目资金池',
+                  custodian_user_id INTEGER,
+                  created_at DATETIME NOT NULL,
+                  updated_at DATETIME NOT NULL,
+                  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                  FOREIGN KEY(custodian_user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_project_fund_pools_project_id "
+                "ON project_fund_pools (project_id)"
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_project_fund_pools_custodian_user_id "
+                "ON project_fund_pools (custodian_user_id)"
+            )
+        )
+
+    if not _table_exists("fund_transfers"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE fund_transfers (
+                  id INTEGER PRIMARY KEY,
+                  project_id INTEGER NOT NULL,
+                  pool_id INTEGER NOT NULL,
+                  from_account VARCHAR(16) NOT NULL,
+                  to_account VARCHAR(16) NOT NULL,
+                  amount_cents BIGINT NOT NULL,
+                  occur_date DATE NOT NULL,
+                  method VARCHAR(32) NOT NULL DEFAULT '银行转账',
+                  note TEXT,
+                  is_void BOOLEAN NOT NULL DEFAULT 0,
+                  created_by_user_id INTEGER,
+                  created_at DATETIME NOT NULL,
+                  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                  FOREIGN KEY(pool_id) REFERENCES project_fund_pools(id) ON DELETE CASCADE,
+                  FOREIGN KEY(created_by_user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_fund_transfers_project_id "
+                "ON fund_transfers (project_id)"
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_fund_transfers_pool_id "
+                "ON fund_transfers (pool_id)"
+            )
+        )
+
+    if not _table_exists("fund_transfer_attachments"):
+        db.session.execute(
+            text(
+                """
+                CREATE TABLE fund_transfer_attachments (
+                  id INTEGER PRIMARY KEY,
+                  transfer_id INTEGER NOT NULL,
+                  filename VARCHAR(256) NOT NULL,
+                  stored_path VARCHAR(512) NOT NULL,
+                  sha256 VARCHAR(64) NOT NULL,
+                  uploaded_at DATETIME NOT NULL,
+                  uploaded_by_user_id INTEGER,
+                  FOREIGN KEY(transfer_id) REFERENCES fund_transfers(id) ON DELETE CASCADE,
+                  FOREIGN KEY(uploaded_by_user_id) REFERENCES users(id)
+                )
+                """
+            )
+        )
+        db.session.execute(
+            text(
+                "CREATE INDEX ix_fund_transfer_attachments_transfer_id "
+                "ON fund_transfer_attachments (transfer_id)"
+            )
+        )
+
+    # 每个项目预建一个虚拟资金池；历史资金默认全部还在对公账户。
+    if _table_exists("projects") and _table_exists("project_fund_pools"):
+        db.session.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO project_fund_pools
+                  (project_id, name, custodian_user_id, created_at, updated_at)
+                SELECT p.id, '项目资金池', p.leader_user_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                FROM projects p
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM project_fund_pools fp WHERE fp.project_id = p.id
+                )
+                """
+            )
+        )
+    db.session.commit()
+
+
 MIGRATIONS: list[tuple[str, str, Callable[[], None]]] = [
     ("0001", "历史建表/补列汇总（v0 → 2026-10 的全部列与表）", _migration_0001_historical_catchup),
     ("0002", "付款闭环：users.is_finance + transactions 付款/回单字段", _migration_0002_payment_workflow),
+    ("0003", "资金账户：交易收支账户 + 项目资金池与内部划转", _migration_0003_fund_pool),
 ]
 
 

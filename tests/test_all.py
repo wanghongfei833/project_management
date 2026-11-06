@@ -31,9 +31,11 @@ from ledger_app.models import (
     ProjectEndRequest, ProjectEndApproval, ProjectReviveRequest, ProjectReviveApproval,
     ProjectDeleteRequest, ProjectDeleteApproval, ProjectActivityLog, Attachment,
     ProjectLogRule, ProjectUpdate,
+    FundAccount, FundTransfer, ProjectFundPool,
     SmsNotification, SmsNotificationProject,
 )
 from ledger_app.project_finance import build_project_finance
+from ledger_app.services.fund_pool import ensure_project_fund_pool, project_fund_balances
 from ledger_app.log_rules import (
     build_log_reminder_plans,
     local_day_utc_bounds,
@@ -1844,6 +1846,7 @@ class TestSearchExportAndDelivery:
         body = rv.get_data().decode("utf-8")
         assert body.startswith("\ufeff")          # BOM，Excel 中文不乱码
         assert "日期,项目,类型,金额(元)" in body
+        assert "资金账户" in body
         assert "搜索用备注-中介费" in body
 
         rv2 = client.get("/export/projects.csv")
@@ -1916,6 +1919,277 @@ class TestSchemaMigrations:
         ).mappings().all()
         cols = {r["name"] for r in rows}
         assert {"version", "note", "applied_at"} <= cols
+
+
+class TestFundPool:
+    """项目资金账户：收入/支出选账户，公户与资金池内部划转。"""
+
+    @staticmethod
+    def _project(name):
+        seed = get_seed()
+        p = Project(
+            name=name,
+            expected_income_cents=0,
+            broker_fee_mode="percent",
+            broker_fee_direction="we_pay_separate",
+            referral_ratio=Decimal("0"),
+            status="open",
+            leader_user_id=seed["users"]["wang"],
+            planned_start_date=date(2026, 1, 1),
+            planned_end_date=date(2026, 12, 31),
+        )
+        _db.session.add(p)
+        _db.session.flush()
+        for username in ("admin", "wang", "si"):
+            _db.session.add(
+                ProjectMember(
+                    project_id=p.id, user_id=seed["users"][username]
+                )
+            )
+        _db.session.commit()
+        return p
+
+    def test_account_balances_and_transfer_do_not_change_profit(self, app):
+        p = self._project("ProjFundBalance")
+        seed = get_seed()
+        _db.session.add_all([
+            Transaction(
+                project_id=p.id, status="active", type="income",
+                amount_cents=10_000_000, occur_date=date.today(), settled=True,
+                fund_account=FundAccount.PUBLIC.value,
+                counterparty="业主[甲方]",
+                created_by_user_id=seed["users"]["admin"],
+            ),
+            Transaction(
+                project_id=p.id, status="active", type="income",
+                amount_cents=5_000_000, occur_date=date.today(), settled=True,
+                fund_account=FundAccount.POOL.value,
+                counterparty="业主[甲方]",
+                created_by_user_id=seed["users"]["admin"],
+            ),
+            Transaction(
+                project_id=p.id, status="active", type="expense",
+                amount_cents=2_000_000, occur_date=date.today(), settled=True,
+                fund_account=FundAccount.PUBLIC.value, counterparty="供应商",
+                created_by_user_id=seed["users"]["admin"],
+            ),
+            Transaction(
+                project_id=p.id, status="active", type="expense",
+                amount_cents=1_000_000, occur_date=date.today(), settled=True,
+                fund_account=FundAccount.POOL.value, counterparty="供应商",
+                created_by_user_id=seed["users"]["admin"],
+            ),
+        ])
+        _db.session.commit()
+
+        balances = project_fund_balances([p.id])
+        assert balances.public_cents == 8_000_000
+        assert balances.pool_cents == 4_000_000
+        assert balances.total_cents == 12_000_000
+
+        pool = ensure_project_fund_pool(p)
+        _db.session.add(
+            FundTransfer(
+                project_id=p.id,
+                pool_id=pool.id,
+                from_account=FundAccount.PUBLIC.value,
+                to_account=FundAccount.POOL.value,
+                amount_cents=1_000_000,
+                occur_date=date.today(),
+                method="工资代发",
+                created_by_user_id=seed["users"]["wang"],
+            )
+        )
+        _db.session.commit()
+
+        after = project_fund_balances([p.id])
+        assert after.public_cents == 7_000_000
+        assert after.pool_cents == 5_000_000
+        assert after.total_cents == 12_000_000
+
+    def test_transfer_permissions_balance_and_void(self, client):
+        p = self._project("ProjFundTransfer")
+        seed = get_seed()
+        _db.session.add(
+            Transaction(
+                project_id=p.id, status="active", type="income",
+                amount_cents=10_000_000, occur_date=date.today(), settled=True,
+                fund_account=FundAccount.PUBLIC.value,
+                counterparty="业主[甲方]",
+                created_by_user_id=seed["users"]["admin"],
+            )
+        )
+        _db.session.commit()
+        pool = ensure_project_fund_pool(p, commit=True)
+
+        login(client, "si")
+        client.post(
+            f"/projects/{p.id}/fund-pool/transfer",
+            data={
+                "direction": "to_pool",
+                "amount_yuan": "50000.00",
+                "occur_date": date.today().isoformat(),
+                "method": "工资代发",
+                "note": "工资代发后转入",
+            },
+            follow_redirects=True,
+        )
+        assert FundTransfer.query.filter_by(project_id=p.id).count() == 0
+
+        client.post("/logout")
+        login(client, "wang")
+        rv = client.post(
+            f"/projects/{p.id}/fund-pool/transfer",
+            data={
+                "direction": "to_pool",
+                "amount_yuan": "50000.00",
+                "occur_date": date.today().isoformat(),
+                "method": "工资代发",
+                "note": "工资代发后转入",
+            },
+            follow_redirects=True,
+        )
+        assert rv.status_code == 200
+        transfer = FundTransfer.query.filter_by(project_id=p.id).one()
+        balances = project_fund_balances([p.id])
+        assert balances.public_cents == 5_000_000
+        assert balances.pool_cents == 5_000_000
+
+        # 公户余额不足时不能透支
+        client.post(
+            f"/projects/{p.id}/fund-pool/transfer",
+            data={
+                "direction": "to_pool",
+                "amount_yuan": "60000.00",
+                "occur_date": date.today().isoformat(),
+                "method": "银行转账",
+            },
+            follow_redirects=True,
+        )
+        assert FundTransfer.query.filter_by(project_id=p.id).count() == 1
+
+        html = client.get(f"/projects/{p.id}").get_data(as_text=True)
+        assert "项目资金池" in html and "对公账户余额" in html
+        assert "可用资金合计" in html
+
+        client.post(
+            f"/projects/{p.id}/fund-pool/settings",
+            data={
+                "name": "王洪飞代管账户",
+                "custodian_user_id": seed["users"]["si"],
+            },
+            follow_redirects=True,
+        )
+        _db.session.refresh(pool)
+        assert pool.name == "王洪飞代管账户"
+        assert pool.custodian_user_id == seed["users"]["si"]
+
+        client.post(
+            f"/projects/{p.id}/fund-transfers/{transfer.id}/void",
+            follow_redirects=True,
+        )
+        _db.session.refresh(transfer)
+        assert transfer.is_void is True
+        restored = project_fund_balances([p.id])
+        assert restored.public_cents == 10_000_000
+        assert restored.pool_cents == 0
+
+    def test_transaction_selects_account_and_edit_can_change_it(self, client):
+        p = self._project("ProjFundAccountEdit")
+        login(client, "wang")
+        client.post(
+            "/transactions/new",
+            data={
+                "project_id": p.id,
+                "type": "income",
+                "amount_yuan": "1000.00",
+                "occur_date": date.today().isoformat(),
+                "fund_account": FundAccount.POOL.value,
+                "settled": "y",
+                "counterparty": "其他（收入）",
+                "note": "业主直接转入资金池",
+            },
+            follow_redirects=True,
+        )
+        income = (
+            Transaction.query.filter_by(project_id=p.id, type="income")
+            .order_by(Transaction.id.desc())
+            .first()
+        )
+        assert income.fund_account == FundAccount.POOL.value
+
+        client.post(
+            "/transactions/new",
+            data={
+                "project_id": p.id,
+                "type": "expense",
+                "amount_yuan": "300.00",
+                "occur_date": date.today().isoformat(),
+                "fund_account": FundAccount.POOL.value,
+                "settled": "y",
+                "counterparty": "供应商",
+                "note": "资金池付款",
+            },
+            follow_redirects=True,
+        )
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, type="expense")
+            .order_by(Transaction.id.desc())
+            .first()
+        )
+        assert tx.fund_account == FundAccount.POOL.value
+
+        client.post("/logout")
+        login(client, "si")
+        client.post(
+            f"/transactions/{tx.id}/edit",
+            data={
+                "type": "expense",
+                "amount_yuan": "300.00",
+                "occur_date": date.today().isoformat(),
+                "settled": "y",
+                "fund_account": FundAccount.PUBLIC.value,
+                "counterparty": "供应商",
+                "recipient_user_id": 0,
+                "note": "改为公户付款",
+            },
+            follow_redirects=True,
+        )
+        client.post("/logout")
+        login(client, "wang")
+        client.post(
+            f"/transactions/{tx.id}/edit-approve",
+            follow_redirects=True,
+        )
+        _db.session.refresh(tx)
+        assert tx.fund_account == FundAccount.PUBLIC.value
+
+    def test_project_person_without_selection_does_not_store_zero_fk(self, client):
+        p = self._project("ProjFundRecipientZero")
+        login(client, "wang")
+        rv = client.post(
+            "/transactions/new",
+            data={
+                "project_id": p.id,
+                "type": "expense",
+                "amount_yuan": "50.00",
+                "occur_date": date.today().isoformat(),
+                "fund_account": FundAccount.PUBLIC.value,
+                "settled": "y",
+                "counterparty": "项目人员",
+                "recipient_user_id": 0,
+                "note": "未指定具体人员",
+            },
+            follow_redirects=True,
+        )
+        assert rv.status_code == 200
+        tx = (
+            Transaction.query.filter_by(project_id=p.id, type="expense")
+            .order_by(Transaction.id.desc())
+            .first()
+        )
+        assert tx is not None
+        assert tx.recipient_user_id is None
 
 
 class TestPaymentWorkflow:

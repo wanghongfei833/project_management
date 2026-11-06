@@ -174,8 +174,16 @@
               <div class="fw-bold" style="font-size:1.15rem;color:#e74c3c;">¥ {{ paid_cents|money }}</div>
             </div>
             <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">收支差额</div>
-              <div class="fw-bold {% if (received_cents - paid_cents) < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.15rem;">¥ {{ (received_cents - paid_cents)|money }}</div>
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">对公账户余额</div>
+              <div class="fw-bold {% if public_balance_cents < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.15rem;">¥ {{ public_balance_cents|money }}</div>
+            </div>
+            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">资金池余额</div>
+              <div class="fw-bold {% if pool_balance_cents < 0 %}text-danger{% else %}text-info{% endif %}" style="font-size:1.15rem;">¥ {{ pool_balance_cents|money }}</div>
+            </div>
+            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
+              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">可用资金合计</div>
+              <div class="fw-bold {% if available_fund_cents < 0 %}text-danger{% else %}text-primary{% endif %}" style="font-size:1.15rem;">¥ {{ available_fund_cents|money }}</div>
             </div>
             <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
               <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">净利润</div>
@@ -189,6 +197,8 @@
           </div>
         </div>
       </div>
+
+  {% include "_fund_pool.html" %}
 
   <!-- 修改结束日期模态框 -->
   <div class="modal fade" id="endDateModal" tabindex="-1"><div class="modal-dialog modal-sm modal-dialog-centered"><div class="modal-content">
@@ -487,7 +497,10 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
             <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
               <td>{{ t.occur_date }}</td>
               <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
-              <td class="text-end">¥ {{ t.amount_cents|money }}</td>
+              <td class="text-end">
+                ¥ {{ t.amount_cents|money }}
+                <span class="badge text-bg-light border text-muted" style="font-size:.6rem;">{{ fund_account_label(t.fund_account) }}</span>
+              </td>
               <td><span class="badge text-bg-warning">待审核</span></td>
               <td>{% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}{{ user_name_map[t.recipient_user_id] }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
               <td class="small">{{ t.created_by.username if t.created_by else '—' }}</td>
@@ -538,7 +551,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
   {% endif %}
 
   <h2 class="h6">流水（该项目）</h2>
-  <div class="text-muted small mb-2">结余列：按时间顺序累计<strong>已结算</strong>流水（收入 +、支出 −）后的项目账户余额；未结算不改变结余。</div>
+  <div class="text-muted small mb-2">结余列：按时间顺序累计<strong>已结算</strong>流水（收入 +、支出 −）后的总可用资金；公户与资金池互转不改变合计。</div>
   {% if tx_pagination.pages > 1 %}
     <div class="text-muted small mb-2">第 {{ tx_pagination.page }} / {{ tx_pagination.pages }} 页，共 {{ tx_pagination.total }} 条</div>
   {% endif %}
@@ -563,6 +576,7 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
             <td class="text-end">
               {% if t.type == 'income' %}<span class="text-success fw-bold">+</span>{% else %}<span class="text-danger fw-bold">−</span>{% endif %}
               ¥ {{ t.amount_cents|money }}
+              <span class="badge text-bg-light border text-muted" style="font-size:.6rem;">{{ fund_account_label(t.fund_account) }}</span>
               {% if t.settled %}<span class="badge text-bg-success-subtle text-success border-success-subtle" style="font-size:.6rem;">已到账</span>{% else %}<span class="badge text-bg-warning-subtle text-warning border-warning-subtle" style="font-size:.6rem;">未到账</span>{% endif %}
               {% set pay_labels = {'pending': '待审批', 'approved': '待打款', 'paid': '待补回单', 'closed': '已闭环', 'rejected': '已驳回'} %}
               {% if t.payment_status %}

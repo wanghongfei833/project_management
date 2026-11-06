@@ -32,6 +32,7 @@
           <th>日期</th>
           <th>项目</th>
           <th>类型</th>
+          <th>资金账户</th>
           <th class="text-end">金额</th>
           <th>状态</th>
           <th>对方</th>
@@ -45,6 +46,7 @@
             <td>{{ t.occur_date }}</td>
             <td>{{ t.project.name if t.project else '（无）' }}</td>
             <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
+            <td><span class="badge text-bg-light border text-muted">{{ fund_account_label(t.fund_account) }}</span></td>
             <td class="text-end">¥ {{ t.amount_cents|money }}</td>
             <td>
               {{ '已结算' if t.settled else '未结算' }}
@@ -83,7 +85,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="8" class="text-muted">暂无流水</td></tr>
+          <tr><td colspan="9" class="text-muted">暂无流水</td></tr>
         {% endfor %}
       </tbody>
     </table>

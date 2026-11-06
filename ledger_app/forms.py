@@ -28,6 +28,7 @@ from .project_finance import (
     BROKER_MODE_FIXED,
     BROKER_MODE_PERCENT,
 )
+from .services.fund_pool import FUND_ACCOUNT_LABELS, FUND_TRANSFER_METHODS
 from .sms import normalize_phone, is_valid_phone
 
 
@@ -179,6 +180,12 @@ class TransactionForm(FlaskForm):
     )
     occur_date = DateField("发生日期", default=date.today, validators=[DataRequired()])
     settled = BooleanField("已到账/已付款", default=True)
+    fund_account = SelectField(
+        "到账/付款账户",
+        choices=[(key, label) for key, label in FUND_ACCOUNT_LABELS.items()],
+        default="public",
+        validators=[DataRequired()],
+    )
     use_payment_workflow = BooleanField(
         "走付款审批流程（先审批 → 财务打款 → 上传回单）",
         default=True,
@@ -197,9 +204,48 @@ class TransactionEditForm(FlaskForm):
     )
     occur_date = DateField("发生日期", default=date.today, validators=[DataRequired()])
     settled = BooleanField("已到账/已付款", default=True)
+    fund_account = SelectField(
+        "到账/付款账户",
+        choices=[(key, label) for key, label in FUND_ACCOUNT_LABELS.items()],
+        default="public",
+        validators=[DataRequired()],
+    )
     counterparty = SelectField("对方", coerce=str, validators=[DataRequired()], choices=[], validate_choice=False)
     recipient_user_id = SelectField("项目人员", coerce=int, validators=[Optional()], choices=[], validate_choice=False)
     note = TextAreaField("备注", validators=[Optional(), Length(max=2000)])
+
+
+class FundTransferForm(FlaskForm):
+    direction = SelectField(
+        "划转方向",
+        choices=[
+            ("to_pool", "对公账户 → 项目资金池"),
+            ("from_pool", "项目资金池 → 对公账户"),
+        ],
+        default="to_pool",
+        validators=[DataRequired()],
+    )
+    amount_yuan = DecimalField(
+        "划转金额（元）",
+        places=2,
+        rounding=None,
+        validators=[DataRequired(), NumberRange(min=0.01)],
+    )
+    occur_date = DateField("划转日期", default=date.today, validators=[DataRequired()])
+    method = SelectField(
+        "划转方式",
+        choices=[(m, m) for m in FUND_TRANSFER_METHODS],
+        default="银行转账",
+        validators=[DataRequired()],
+    )
+    note = TextAreaField("备注", validators=[Optional(), Length(max=2000)])
+
+
+class FundPoolSettingsForm(FlaskForm):
+    name = StringField("资金池名称", validators=[Optional(), Length(max=128)])
+    custodian_user_id = SelectField(
+        "资金池保管人", coerce=int, validators=[DataRequired()]
+    )
 
 
 class ProjectAdjustmentForm(FlaskForm):

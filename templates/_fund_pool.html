@@ -1,0 +1,190 @@
+<div class="card mb-4" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.05);border:1px solid #e8ecf0;">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2"
+       style="background:linear-gradient(135deg,#366b8f,#28536f);color:#fff;border-radius:10px 10px 0 0;">
+    <div>
+      <span class="fw-bold">💰 项目资金池</span>
+      <span class="small ms-2 opacity-75">
+        保管人：{{ fund_pool.custodian.username if fund_pool.custodian else '未设置' }}
+      </span>
+    </div>
+    {% if can_manage_fund_pool and project.status != 'ended' %}
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-light" type="button" data-bs-toggle="modal" data-bs-target="#fundTransferModal">
+          资金划转
+        </button>
+        <button class="btn btn-sm btn-outline-light" type="button" data-bs-toggle="modal" data-bs-target="#fundPoolSettingsModal">
+          设置
+        </button>
+      </div>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    <div class="row g-2 mb-3">
+      <div class="col-md-4">
+        <div class="rounded-3 p-3 h-100" style="background:#f7fafc;border:1px solid #e8ecf0;">
+          <div class="text-muted small">对公账户余额</div>
+          <div class="fs-5 fw-bold">¥ {{ public_balance_cents|money }}</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="rounded-3 p-3 h-100" style="background:#f2f8fb;border:1px solid #d9e8f0;">
+          <div class="text-muted small">资金池余额</div>
+          <div class="fs-5 fw-bold text-info">¥ {{ pool_balance_cents|money }}</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="rounded-3 p-3 h-100" style="background:#f6f8ff;border:1px solid #dfe5fa;">
+          <div class="text-muted small">项目可用资金合计</div>
+          <div class="fs-5 fw-bold text-primary">¥ {{ available_fund_cents|money }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert alert-light border py-2 small mb-3">
+      公户与资金池之间的划转只改变资金所在账户，不计收入、不计支出，也不改变项目利润。
+      若工资中一部分是真实人工成本，请把该部分单独登记为支出，剩余代管资金再登记为划转。
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="fw-semibold">最近资金划转</div>
+      <div class="text-muted small">共 {{ fund_transfers|length }} 条</div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>日期</th>
+            {% if is_parent %}<th>项目</th>{% endif %}
+            <th>方向</th>
+            <th class="text-end">金额</th>
+            <th>方式</th>
+            <th>经办人</th>
+            <th>备注 / 凭证</th>
+            {% if can_manage_fund_pool and project.status != 'ended' %}<th></th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for transfer in fund_transfers %}
+            <tr>
+              <td class="small text-nowrap">{{ transfer.occur_date }}</td>
+              {% if is_parent %}<td class="small">{{ transfer.project.name if transfer.project else '—' }}</td>{% endif %}
+              <td class="small text-nowrap">
+                {{ fund_account_label(transfer.from_account) }}
+                <span class="text-muted">→</span>
+                {{ fund_account_label(transfer.to_account) }}
+              </td>
+              <td class="text-end fw-semibold">¥ {{ transfer.amount_cents|money }}</td>
+              <td class="small">{{ transfer.method }}</td>
+              <td class="small">{{ transfer.created_by.username if transfer.created_by else '—' }}</td>
+              <td class="small">
+                {% if transfer.note %}<div class="text-truncate" style="max-width:260px;">{{ transfer.note }}</div>{% endif %}
+                {% if transfer.attachments %}
+                  {% set att_items = [] %}
+                  {% for a in transfer.attachments %}
+                    {% set _ = att_items.append({"name": a.filename, "url": url_for("main.uploads", filename=a.stored_path)}) %}
+                  {% endfor %}
+                  <a href="#" class="text-decoration-none"
+                     data-receipt-title="资金划转 #{{ transfer.id }} 的凭证"
+                     data-receipts='{{ att_items|tojson }}'>查看凭证（{{ transfer.attachments|length }}）</a>
+                {% else %}
+                  <span class="text-muted">无</span>
+                {% endif %}
+              </td>
+              {% if can_manage_fund_pool and project.status != 'ended' %}
+                <td class="text-end">
+                  <form method="post"
+                        action="{{ url_for('main.fund_pool_transfer_void', project_id=project.id, transfer_id=transfer.id) }}"
+                        onsubmit="return confirm('确认撤销这笔资金划转？余额会自动恢复，记录仍保留。');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger py-0" type="submit">撤销</button>
+                  </form>
+                </td>
+              {% endif %}
+            </tr>
+          {% else %}
+            <tr><td colspan="{% if is_parent %}8{% else %}7{% endif %}" class="text-muted">还没有资金划转记录</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% if can_manage_fund_pool and project.status != 'ended' %}
+  <div class="modal fade" id="fundTransferModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <form method="post" enctype="multipart/form-data"
+              action="{{ url_for('main.fund_pool_transfer', project_id=project.id) }}">
+          {{ fund_transfer_form.hidden_tag() }}
+          <div class="modal-header">
+            <h5 class="modal-title">资金划转</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">划转方向</label>
+                {{ fund_transfer_form.direction(class="form-select") }}
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">划转金额（元）</label>
+                {{ fund_transfer_form.amount_yuan(class="form-control", placeholder="例如 50000.00") }}
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">划转日期</label>
+                {{ fund_transfer_form.occur_date(class="form-control") }}
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">划转方式</label>
+                {{ fund_transfer_form.method(class="form-select") }}
+              </div>
+              <div class="col-12">
+                <label class="form-label">备注</label>
+                {{ fund_transfer_form.note(class="form-control", rows="2", placeholder="例如：工资代发后项目资金转入保管账户") }}
+              </div>
+              <div class="col-12">
+                {% from "_upload.html" import upload_field %}
+                <label class="form-label">划转凭证</label>
+                {{ upload_field("attachments_fund_transfer", "可上传银行流水、工资单或转账截图。") }}
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-primary" type="submit">确认划转</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="fundPoolSettingsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <form method="post" action="{{ url_for('main.fund_pool_settings', project_id=project.id) }}">
+          {{ fund_pool_form.hidden_tag() }}
+          <div class="modal-header">
+            <h5 class="modal-title">资金池设置</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label">资金池名称</label>
+              {{ fund_pool_form.name(class="form-control") }}
+            </div>
+            <div>
+              <label class="form-label">保管人</label>
+              {{ fund_pool_form.custodian_user_id(class="form-select") }}
+              <div class="form-text">保管人应是实际持有资金池资金的项目成员。</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-primary" type="submit">保存设置</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endif %}

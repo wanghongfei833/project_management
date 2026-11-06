@@ -39,6 +39,7 @@ from .models import (
     User,
 )
 from .utils import format_cents
+from .services.fund_pool import fund_account_label
 
 
 def _url(endpoint: str, **values) -> str:
@@ -175,6 +176,7 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     summary=(
                         f"#{tx.id} {_type_label(tx.type)} "
                         f"¥{format_cents(tx.amount_cents)}，{_fmt_date(tx.occur_date)}"
+                        f" · {fund_account_label(tx.fund_account)}"
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     requester_id=int(req.created_by_user_id or 0),
@@ -219,6 +221,7 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                         f"¥{format_cents(tx.amount_cents)} → "
                         f"{_type_label(req.new_type)} ¥{format_cents(req.new_amount_cents)}，"
                         f"{_fmt_date(req.new_occur_date)}"
+                        f" · {fund_account_label(req.new_fund_account)}"
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     requester_id=int(req.created_by_user_id or 0),
@@ -261,6 +264,7 @@ def pending_items_for_user(user_id: int, *, is_admin_user: bool) -> list[Pending
                     summary=(
                         f"#{tx.id} {_type_label(tx.type)} "
                         f"¥{format_cents(tx.amount_cents)}，{_fmt_date(tx.occur_date)}"
+                        f" · {fund_account_label(tx.fund_account)}"
                     ),
                     requester=names.get(int(req.created_by_user_id or 0), "—"),
                     requester_id=int(req.created_by_user_id or 0),

@@ -1,6 +1,8 @@
 """projects.py：路由实现（原 routes.py 拆分而来，URL/行为不变）。"""
 from ._common import *  # noqa: F401,F403
 
+from ..services.payments import can_pay_for_project
+
 
 
 @bp.get("/projects")
@@ -97,6 +99,7 @@ def projects_new():
         member_ids.add(int(form.leader_user_id.data))  # 负责人必须是成员
         for uid in member_ids:
             db.session.add(ProjectMember(project_id=p.id, user_id=int(uid)))
+        ensure_project_fund_pool(p)
 
         _log_project_activity(
             int(p.id),
@@ -237,6 +240,7 @@ def projects_edit(project_id: int):
                 project=p,
             )
 
+        old_leader_id = p.leader_user_id
         p.name = name
         p.leader_user_id = int(form.leader_user_id.data)
         p.expected_income_cents = yuan_to_cents(form.expected_income_yuan.data)
@@ -262,6 +266,11 @@ def projects_edit(project_id: int):
         for uid in new_member_ids:
             if uid not in existing_ids:
                 db.session.add(ProjectMember(project_id=p.id, user_id=int(uid)))
+        fund_pool = ensure_project_fund_pool(p)
+        if not fund_pool.custodian_user_id or int(fund_pool.custodian_user_id) == int(
+            old_leader_id or 0
+        ):
+            fund_pool.custodian_user_id = int(p.leader_user_id)
 
         _log_project_activity(
             int(p.id),
@@ -489,6 +498,8 @@ def project_detail(project_id: int):
         query_pid_filter = Transaction.project_id.in_(all_ids)
     else:
         query_pid_filter = Transaction.project_id == p.id
+    fund_project_ids = all_ids if is_parent else {int(p.id)}
+    ensure_project_fund_pool(p, commit=True)
 
     tx_page = request.args.get("tx_page", 1, type=int) or 1
     tx_page = max(tx_page, 1)
@@ -570,6 +581,32 @@ def project_detail(project_id: int):
         .join(ProjectMember, ProjectMember.user_id == User.id)
         .filter(ProjectMember.project_id == p.id)
         .order_by(User.username.asc())
+        .all()
+    )
+    fund_pool_form = FundPoolSettingsForm()
+    fund_pool_form.custodian_user_id.choices = [
+        (int(u.id), u.username) for u in members
+    ]
+    fund_pool = ensure_project_fund_pool(p)
+    if request.method == "GET":
+        fund_pool_form.name.data = fund_pool.name
+        fund_pool_form.custodian_user_id.data = int(
+            fund_pool.custodian_user_id or p.leader_user_id or 0
+        )
+    fund_transfer_form = FundTransferForm()
+    fund_balances = project_fund_balances(fund_project_ids)
+    fund_transfers = (
+        FundTransfer.query.options(
+            joinedload(FundTransfer.attachments),
+            joinedload(FundTransfer.created_by),
+            joinedload(FundTransfer.project),
+        )
+        .filter(
+            FundTransfer.project_id.in_(fund_project_ids),
+            FundTransfer.is_void.is_(False),
+        )
+        .order_by(FundTransfer.occur_date.desc(), FundTransfer.id.desc())
+        .limit(50)
         .all()
     )
     # 项目人员显示：过滤掉非负责人的管理员（admin不参与实际工作）
@@ -850,6 +887,15 @@ def project_detail(project_id: int):
         dividend_expense_cents=int(dividend_expense_cents),
         tx_pagination=tx_pagination,
         activity_logs=activity_logs,
+        fund_pool=fund_pool,
+        fund_pool_form=fund_pool_form,
+        fund_transfer_form=fund_transfer_form,
+        fund_transfers=fund_transfers,
+        public_balance_cents=int(fund_balances.public_cents),
+        pool_balance_cents=int(fund_balances.pool_cents),
+        available_fund_cents=int(fund_balances.total_cents),
+        can_manage_fund_pool=can_pay_for_project(int(p.id)),
+        fund_account_label=fund_account_label,
         is_admin=is_admin(),
     )
 

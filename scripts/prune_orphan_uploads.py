@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """清理 uploads 下未被数据库引用的孤儿文件（默认只预览，--apply 才移动）。
 
-孤儿文件 = 磁盘上存在、但没有任何附件记录（attachments /
-project_update_attachments 的 stored_path）指向它的文件。常见来源是删除流水时
+孤儿文件 = 磁盘上存在、但没有任何附件记录（流水、进展或资金划转附件表）
+指向它的文件。常见来源是删除流水时
 没有连带清理磁盘文件。
 
 为了不丢数据，脚本只做「移动」：把孤儿文件按原相对路径挪到 --dest 目录
@@ -21,7 +21,11 @@ import sqlite3
 import sys
 from pathlib import Path
 
-ATTACHMENT_TABLES = ("attachments", "project_update_attachments")
+ATTACHMENT_TABLES = (
+    "attachments",
+    "project_update_attachments",
+    "fund_transfer_attachments",
+)
 
 
 def referenced_paths(conn: sqlite3.Connection) -> set[str]:

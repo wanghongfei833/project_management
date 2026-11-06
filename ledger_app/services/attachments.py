@@ -8,10 +8,19 @@ from flask_login import current_user
 
 from ..extensions import db
 from ..models import (
-    Attachment, ProjectMember, ProjectUpdate, ProjectUpdateAttachment, Transaction, User,
+    Attachment,
+    FundTransfer,
+    FundTransferAttachment,
+    ProjectMember,
+    ProjectUpdate,
+    ProjectUpdateAttachment,
+    Transaction,
+    User,
 )
 from ..upload_paths import (
-    attachment_display_name, project_update_attachment_relpath,
+    attachment_display_name,
+    fund_transfer_attachment_relpath,
+    project_update_attachment_relpath,
     transaction_attachment_relpath,
 )
 from ..utils import safe_join_upload, sha256_file
@@ -152,6 +161,49 @@ def _save_project_update_attachments(update: ProjectUpdate) -> int:
         db.session.add(
             ProjectUpdateAttachment(
                 update_id=update.id,
+                filename=display_name,
+                stored_path=stored_rel,
+                sha256=digest,
+                uploaded_by_user_id=current_user.id,
+            )
+        )
+        n += 1
+    return n
+
+
+def _save_fund_transfer_attachments(transfer: FundTransfer) -> int:
+    """保存资金划转凭证。"""
+    project_id = int(transfer.project_id)
+    upload_root = current_app.config["UPLOAD_FOLDER"]
+    files = request.files.getlist("attachments")
+    existing_count = FundTransferAttachment.query.filter_by(
+        transfer_id=transfer.id
+    ).count()
+    selected = [f for f in files if f and getattr(f, "filename", "")]
+    if existing_count + len(selected) > MAX_ATTACHMENTS_PER_TX:
+        flash(f"每笔资金划转最多 {MAX_ATTACHMENTS_PER_TX} 个附件", "warning")
+        return 0
+
+    n = 0
+    for f in selected:
+        display_name = attachment_display_name(f.filename)
+        try:
+            f.stream.seek(0)
+            digest = sha256_file(f.stream)
+            f.stream.seek(0)
+            stored_rel = fund_transfer_attachment_relpath(
+                project_id, int(transfer.id), digest, display_name
+            )
+        except ValueError as exc:
+            flash(str(exc), "warning")
+            continue
+
+        abs_path = safe_join_upload(upload_root, stored_rel)
+        Path(abs_path).parent.mkdir(parents=True, exist_ok=True)
+        f.save(abs_path)
+        db.session.add(
+            FundTransferAttachment(
+                transfer_id=transfer.id,
                 filename=display_name,
                 stored_path=stored_rel,
                 sha256=digest,

@@ -24,6 +24,11 @@
           <label class="form-label">发生日期</label>
           {{ form.occur_date(class="form-control") }}
         </div>
+        <div class="col-md-4">
+          <label class="form-label" id="fund_account_label">到账/付款账户</label>
+          {{ form.fund_account(class="form-select", id="fund_account") }}
+          <div class="form-text">资金归属账户；公户转入资金池请使用项目页「资金划转」。</div>
+        </div>
         <div class="col-md-4 d-flex align-items-end" id="settled_wrap">
           <div class="form-check">
             {{ form.settled(class="form-check-input") }}
@@ -116,9 +121,11 @@
   // 付款流程只对支出有效；勾选时隐藏「已付款」勾选框（由财务打款时记录）
   var wf = document.getElementById('use_payment_workflow');
   var settledWrap = document.getElementById('settled_wrap');
+  var fundLabel = document.getElementById('fund_account_label');
   function syncWorkflow() {
     if (!typeEl || !wf || !settledWrap) return;
     var isExpense = typeEl.value === 'expense';
+    if (fundLabel) fundLabel.textContent = isExpense ? '付款账户' : '到账账户';
     document.getElementById('workflow_wrap').style.display = isExpense ? '' : 'none';
     settledWrap.style.display = (isExpense && wf.checked) ? 'none' : '';
   }

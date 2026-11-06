@@ -63,6 +63,7 @@ def transactions_list():
         member_count_by_project=member_count_by_project,
         projects=projects,
         current_project_id=project_id,
+        fund_account_label=fund_account_label,
         is_admin=is_admin(),
     )
 
@@ -115,13 +116,19 @@ def transactions_new():
         else:
             tx_settled = bool(form.settled.data)
             payment_status = None
+        recipient_uid = int(form.recipient_user_id.data or 0)
         tx = Transaction(
             project_id=pid, status=tx_status, type=form.type.data,
             amount_cents=yuan_to_cents(form.amount_yuan.data),
             occur_date=form.occur_date.data, settled=tx_settled,
+            fund_account=form.fund_account.data,
             payment_status=payment_status,
             counterparty=form.counterparty.data or None,
-            recipient_user_id=form.recipient_user_id.data if form.counterparty.data == CP_EXPENSE_MEMBER else None,
+            recipient_user_id=(
+                recipient_uid
+                if form.counterparty.data == CP_EXPENSE_MEMBER and recipient_uid > 0
+                else None
+            ),
             note=form.note.data or None, created_by_user_id=current_user.id,
         )
         db.session.add(tx)
@@ -135,11 +142,13 @@ def transactions_new():
             db.session.add(TransactionCreateApproval(request_id=creq.id, user_id=current_user.id))
             _log_project_activity(pid, "transaction.create_request",
                 f"发起新增流水 #{tx.id} 审批：{typ} ¥{format_cents(int(tx.amount_cents))}，日期 {tx.occur_date}"
+                f"，{fund_account_label(tx.fund_account)}"
                 + ("（付款申请：审批通过后待财务打款）" if is_workflow_expense else "")
                 + (f"，附件 {added} 个" if added else ""), detail=f"request_id={creq.id}")
         else:
             _log_project_activity(pid, "transaction.create",
                 f"新增流水 #{tx.id}：{typ} ¥{format_cents(int(tx.amount_cents))}，日期 {tx.occur_date}"
+                f"，{fund_account_label(tx.fund_account)}"
                 + ("（付款申请：待财务打款）" if is_workflow_expense else "")
                 + (f"，附件 {added} 个" if added else ""))
         db.session.commit()
@@ -200,6 +209,7 @@ def transactions_edit(transaction_id: int):
         form.amount_yuan.data = cents_to_yuan(int(tx.amount_cents))
         form.occur_date.data = tx.occur_date
         form.settled.data = bool(tx.settled)
+        form.fund_account.data = tx.fund_account or FundAccount.PUBLIC.value
         form.counterparty.data = old_cp
         form.recipient_user_id.data = tx.recipient_user_id or 0
         form.note.data = tx.note or ""
@@ -209,6 +219,7 @@ def transactions_edit(transaction_id: int):
         raw_note = form.note.data or None
         if raw_note and (tx.note or "").startswith("[DIVIDEND]") and not raw_note.startswith("[DIVIDEND]"):
             raw_note = f"[DIVIDEND] {raw_note}"
+        recipient_uid = int(form.recipient_user_id.data or 0)
         req = TransactionEditRequest(
             transaction_id=tx.id,
             project_id=int(tx.project_id),
@@ -217,8 +228,13 @@ def transactions_edit(transaction_id: int):
             new_amount_cents=yuan_to_cents(form.amount_yuan.data),
             new_occur_date=form.occur_date.data,
             new_settled=bool(form.settled.data),
+            new_fund_account=form.fund_account.data,
             new_counterparty=form.counterparty.data or None,
-            new_recipient_user_id=form.recipient_user_id.data if form.counterparty.data == CP_EXPENSE_MEMBER else None,
+            new_recipient_user_id=(
+                recipient_uid
+                if form.counterparty.data == CP_EXPENSE_MEMBER and recipient_uid > 0
+                else None
+            ),
             new_note=raw_note,
             created_by_user_id=current_user.id,
         )
@@ -246,6 +262,7 @@ def transactions_edit(transaction_id: int):
             tx.amount_cents = int(req.new_amount_cents)
             tx.occur_date = req.new_occur_date
             tx.settled = bool(req.new_settled)
+            tx.fund_account = req.new_fund_account
             tx.counterparty = req.new_counterparty
             tx.recipient_user_id = req.new_recipient_user_id
             tx.note = req.new_note
@@ -324,6 +341,7 @@ def transactions_edit_approve(transaction_id: int):
         tx.amount_cents = int(req.new_amount_cents)
         tx.occur_date = req.new_occur_date
         tx.settled = bool(req.new_settled)
+        tx.fund_account = req.new_fund_account
         tx.counterparty = req.new_counterparty
         tx.recipient_user_id = req.new_recipient_user_id
         tx.note = req.new_note
@@ -373,6 +391,7 @@ def transactions_edit_execute(transaction_id: int):
     tx.amount_cents = int(req.new_amount_cents)
     tx.occur_date = req.new_occur_date
     tx.settled = bool(req.new_settled)
+    tx.fund_account = req.new_fund_account
     tx.counterparty = req.new_counterparty
     tx.note = req.new_note
 

@@ -84,6 +84,10 @@
           <label class="form-label">发生日期</label>
           {{ form.occur_date(class="form-control") }}
         </div>
+        <div class="col-md-3">
+          <label class="form-label" id="fund_account_label">到账/付款账户</label>
+          {{ form.fund_account(class="form-select", id="fund_account") }}
+        </div>
         <div class="col-md-3 d-flex align-items-end">
           <div class="form-check">
             {{ form.settled(class="form-check-input") }}
@@ -127,6 +131,7 @@
   var rw = document.getElementById('recipient_wrap');
   var nh = document.getElementById('note_required_hint');
   var ch = document.getElementById('cp_hint');
+  var fundLabel = document.getElementById('fund_account_label');
 
   var incomeKeys = ['业主[甲方]', '其他（收入）'];
   var expenseKeys = ['项目人员', '报销款', '中介费', '供应商', '业主退款', '其他'];
@@ -164,9 +169,15 @@
   }
 
   if (typeEl) typeEl.addEventListener('change', filterOptions);
+  if (typeEl) typeEl.addEventListener('change', function () {
+    if (fundLabel) fundLabel.textContent = typeEl.value === 'expense' ? '付款账户' : '到账账户';
+  });
   if (cpEl) cpEl.addEventListener('change', syncDisplay);
   filterOptions();
   syncDisplay();
+  if (fundLabel && typeEl) {
+    fundLabel.textContent = typeEl.value === 'expense' ? '付款账户' : '到账账户';
+  }
 })();
 </script>
 {% endblock %}

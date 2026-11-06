@@ -183,6 +183,17 @@ class Project(db.Model):
         "ProjectDividendDistribution", back_populates="project"
     )
     activity_logs = db.relationship("ProjectActivityLog", back_populates="project")
+    fund_pool = db.relationship(
+        "ProjectFundPool",
+        back_populates="project",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    fund_transfers = db.relationship(
+        "FundTransfer",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
 
 class ProjectActivityLog(db.Model):
@@ -496,6 +507,11 @@ class TransactionType(str, Enum):
     EXPENSE = "expense"
 
 
+class FundAccount(str, Enum):
+    PUBLIC = "public"
+    POOL = "pool"
+
+
 class Transaction(db.Model):
     __tablename__ = "transactions"
 
@@ -506,6 +522,14 @@ class Transaction(db.Model):
     amount_cents = db.Column(db.BigInteger, nullable=False)
     occur_date = db.Column(db.Date, nullable=False, default=date.today)
     settled = db.Column(db.Boolean, nullable=False, default=True)
+    # 资金实际所在账户：public=对公账户，pool=项目资金池
+    fund_account = db.Column(
+        db.String(16),
+        nullable=False,
+        default=FundAccount.PUBLIC.value,
+        server_default=FundAccount.PUBLIC.value,
+        index=True,
+    )
     counterparty = db.Column(db.String(256), nullable=True)
     recipient_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
     note = db.Column(db.Text, nullable=True)
@@ -552,6 +576,12 @@ class TransactionEditRequest(db.Model):
     new_amount_cents = db.Column(db.BigInteger, nullable=False)
     new_occur_date = db.Column(db.Date, nullable=False)
     new_settled = db.Column(db.Boolean, nullable=False)
+    new_fund_account = db.Column(
+        db.String(16),
+        nullable=False,
+        default=FundAccount.PUBLIC.value,
+        server_default=FundAccount.PUBLIC.value,
+    )
     new_counterparty = db.Column(db.String(256), nullable=True)
     new_recipient_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     new_note = db.Column(db.Text, nullable=True)
@@ -564,6 +594,95 @@ class TransactionEditRequest(db.Model):
     transaction = db.relationship("Transaction", back_populates="edit_requests")
     project = db.relationship("Project")
     approvals = db.relationship("TransactionEditApproval", back_populates="request")
+
+
+class ProjectFundPool(db.Model):
+    """项目虚拟资金池：钱由保管人代管，但仍属于项目可用资金。"""
+
+    __tablename__ = "project_fund_pools"
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(
+        db.Integer,
+        db.ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    name = db.Column(db.String(128), nullable=False, default="项目资金池")
+    custodian_user_id = db.Column(
+        db.Integer, db.ForeignKey("users.id"), nullable=True, index=True
+    )
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    project = db.relationship("Project", back_populates="fund_pool")
+    custodian = db.relationship("User", foreign_keys=[custodian_user_id])
+    transfers = db.relationship("FundTransfer", back_populates="pool")
+
+
+class FundTransfer(db.Model):
+    """项目内部的公户/资金池划转，不计收入、支出或利润。"""
+
+    __tablename__ = "fund_transfers"
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(
+        db.Integer,
+        db.ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    pool_id = db.Column(
+        db.Integer,
+        db.ForeignKey("project_fund_pools.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    from_account = db.Column(db.String(16), nullable=False)
+    to_account = db.Column(db.String(16), nullable=False)
+    amount_cents = db.Column(db.BigInteger, nullable=False)
+    occur_date = db.Column(db.Date, nullable=False, default=date.today)
+    method = db.Column(db.String(32), nullable=False, default="银行转账")
+    note = db.Column(db.Text, nullable=True)
+    is_void = db.Column(db.Boolean, nullable=False, default=False)
+    created_by_user_id = db.Column(
+        db.Integer, db.ForeignKey("users.id"), nullable=True
+    )
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    project = db.relationship("Project", back_populates="fund_transfers")
+    pool = db.relationship("ProjectFundPool", back_populates="transfers")
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
+    attachments = db.relationship(
+        "FundTransferAttachment",
+        back_populates="transfer",
+        cascade="all, delete-orphan",
+    )
+
+
+class FundTransferAttachment(db.Model):
+    __tablename__ = "fund_transfer_attachments"
+
+    id = db.Column(db.Integer, primary_key=True)
+    transfer_id = db.Column(
+        db.Integer,
+        db.ForeignKey("fund_transfers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    filename = db.Column(db.String(256), nullable=False)
+    stored_path = db.Column(db.String(512), nullable=False)
+    sha256 = db.Column(db.String(64), nullable=False)
+    uploaded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    uploaded_by_user_id = db.Column(
+        db.Integer, db.ForeignKey("users.id"), nullable=True
+    )
+
+    transfer = db.relationship("FundTransfer", back_populates="attachments")
+    uploaded_by = db.relationship("User", foreign_keys=[uploaded_by_user_id])
 
 
 class TransactionEditApproval(db.Model):
