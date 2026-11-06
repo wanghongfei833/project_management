@@ -6,12 +6,19 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import func
+
 from .models import Transaction, TransactionType
 
 BROKER_MODE_PERCENT = "percent"
 BROKER_MODE_FIXED = "fixed"
 BROKER_DIR_WE_PAY = "we_pay_separate"
 BROKER_DIR_NET_FROM_BROKER = "net_from_broker"
+
+
+def expense_cash_expr():
+    """支出实际占用现金：优先取财务实付金额，旧数据回退到申请金额。"""
+    return func.coalesce(Transaction.paid_amount_cents, Transaction.amount_cents)
 
 
 def referral_ratio_dec(ratio) -> Decimal:
@@ -176,6 +183,10 @@ def running_settled_cash_balance_by_transaction_id(project_id: int) -> dict[int,
             if t.type == TransactionType.INCOME.value:
                 bal += int(t.amount_cents)
             else:
-                bal -= int(t.amount_cents)
+                bal -= int(
+                    t.paid_amount_cents
+                    if t.paid_amount_cents is not None
+                    else t.amount_cents
+                )
         after[int(t.id)] = bal
     return after

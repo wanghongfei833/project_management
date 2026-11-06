@@ -32,6 +32,7 @@ from ..project_finance import (
     BROKER_MODE_FIXED,
     BROKER_MODE_PERCENT,
     build_project_finance,
+    expense_cash_expr,
     referral_ratio_dec,
     running_settled_cash_balance_by_transaction_id,
 )

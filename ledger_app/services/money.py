@@ -10,6 +10,7 @@ from flask import Response, request
 
 from ..extensions import db
 from ..models import Transaction, TransactionType
+from ..project_finance import expense_cash_expr
 
 
 
@@ -30,7 +31,7 @@ def _dividend_cash_balance_cents(project_id: int) -> int:
     """
     def _sum(tx_type: str) -> int:
         return int(
-            db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+            db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0))
             .filter(
                 Transaction.project_id == int(project_id),
                 Transaction.type == tx_type,

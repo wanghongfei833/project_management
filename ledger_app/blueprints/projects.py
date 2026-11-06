@@ -677,7 +677,7 @@ def project_detail(project_id: int):
         or 0
     )
     paid_cents_all = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+        db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0))
         .filter(
             query_pid_filter,
             Transaction.type == TransactionType.EXPENSE.value,
@@ -689,7 +689,7 @@ def project_detail(project_id: int):
         or 0
     )
     dividend_expense_cents = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+        db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0))
         .filter(
             query_pid_filter,
             Transaction.type == TransactionType.EXPENSE.value,
@@ -704,7 +704,7 @@ def project_detail(project_id: int):
     paid_cents = int(paid_cents_all)
     # 实际已支付的中介费（支出流水，对方=中介费）：算「未收净额」要用它
     broker_paid_cents = int(
-        db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+        db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0))
         .filter(
             query_pid_filter,
             Transaction.type == TransactionType.EXPENSE.value,

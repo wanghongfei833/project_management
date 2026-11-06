@@ -1206,6 +1206,52 @@ def _migration_0006_hidden_project_links() -> None:
     db.session.commit()
 
 
+def _migration_0007_sync_edited_paid_amounts() -> None:
+    """修复已付款流水改金额后，实付金额仍保留旧值造成的历史差异。"""
+    if not (
+        _table_exists("transactions")
+        and _table_exists("transaction_edit_requests")
+    ):
+        return
+    condition = """
+      t.type = 'expense'
+      AND t.settled = 1
+      AND t.payment_status IN ('paid', 'closed')
+      AND t.paid_amount_cents IS NOT NULL
+      AND t.paid_amount_cents <> t.amount_cents
+      AND EXISTS (
+        SELECT 1 FROM transaction_edit_requests r
+        WHERE r.transaction_id = t.id
+          AND r.status = 'executed'
+          AND r.new_amount_cents = t.amount_cents
+      )
+    """
+    if _table_exists("project_activity_logs"):
+        db.session.execute(
+            text(
+                f"""
+                INSERT INTO project_activity_logs
+                  (project_id, action, summary, detail, actor_user_id, created_at)
+                SELECT t.project_id, 'data_repair.paid_amount',
+                       '修正已付款流水实付金额：与编辑后的申请金额同步',
+                       'transaction_id=' || t.id, NULL, CURRENT_TIMESTAMP
+                FROM transactions t
+                WHERE {condition}
+                """
+            )
+        )
+    db.session.execute(
+        text(
+            f"""
+            UPDATE transactions AS t
+            SET paid_amount_cents = t.amount_cents
+            WHERE {condition}
+            """
+        )
+    )
+    db.session.commit()
+
+
 MIGRATIONS: list[tuple[str, str, Callable[[], None]]] = [
     ("0001", "历史建表/补列汇总（v0 → 2026-10 的全部列与表）", _migration_0001_historical_catchup),
     ("0002", "付款闭环：users.is_finance + transactions 付款/回单字段", _migration_0002_payment_workflow),
@@ -1213,6 +1259,7 @@ MIGRATIONS: list[tuple[str, str, Callable[[], None]]] = [
     ("0004", "历史已结算支出补齐付款闭环状态", _migration_0004_close_legacy_expenses),
     ("0005", "父子项目严格隔离的内部分包结算", _migration_0005_subcontract_settlements),
     ("0006", "隐藏项目关联并迁移旧父子关系", _migration_0006_hidden_project_links),
+    ("0007", "同步已付款流水修改后的实付金额", _migration_0007_sync_edited_paid_amounts),
 ]
 
 

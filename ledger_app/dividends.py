@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from .extensions import db
 from .models import ProjectDividendDistribution, Transaction, TransactionType
+from .project_finance import expense_cash_expr
 
 DIVIDEND_NOTE_PREFIX = "[DIVIDEND]"
 
@@ -41,7 +42,7 @@ def dividend_metrics(project_id: int, *, received_net_cents: int) -> DividendMet
 
     def _sum(*extra) -> int:
         return int(
-            db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+            db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0))
             .filter(*expense_filter, *extra)
             .scalar()
             or 0

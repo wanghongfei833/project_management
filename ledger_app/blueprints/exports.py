@@ -135,7 +135,7 @@ def export_projects_csv():
         for pid, total in (
             db.session.query(
                 Transaction.project_id,
-                db.func.coalesce(db.func.sum(Transaction.amount_cents), 0),
+                db.func.coalesce(db.func.sum(expense_cash_expr()), 0),
             )
             .filter(
                 Transaction.type == TransactionType.EXPENSE.value,
@@ -165,7 +165,18 @@ def export_projects_csv():
 
         base = [Transaction.project_id == p.id, Transaction.is_void.is_(False), Transaction.status == "active"]
         received = _sum(*base, Transaction.type == TransactionType.INCOME.value, Transaction.settled.is_(True))
-        expense = _sum(*base, Transaction.type == TransactionType.EXPENSE.value, Transaction.settled.is_(True))
+        expense = int(
+            db.session.query(
+                db.func.coalesce(db.func.sum(expense_cash_expr()), 0)
+            )
+            .filter(
+                *base,
+                Transaction.type == TransactionType.EXPENSE.value,
+                Transaction.settled.is_(True),
+            )
+            .scalar()
+            or 0
+        )
         expected_total = int(
             project_link_summary(int(p.id)).total_receivable_cents
         )

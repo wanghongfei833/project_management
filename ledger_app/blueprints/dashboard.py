@@ -78,7 +78,7 @@ def dashboard():
     )
     income_q = _apply_transaction_project_access_filter(income_q)
     income_cents = income_q.scalar()
-    expense_q = db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0)).filter(
+    expense_q = db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0)).filter(
         Transaction.type == TransactionType.EXPENSE.value,
         Transaction.settled.is_(True),
         Transaction.is_void.is_(False),
@@ -100,7 +100,7 @@ def dashboard():
         for pid, total in (
             db.session.query(
                 Transaction.project_id,
-                db.func.coalesce(db.func.sum(Transaction.amount_cents), 0),
+                db.func.coalesce(db.func.sum(expense_cash_expr()), 0),
             )
             .filter(
                 Transaction.type == TransactionType.EXPENSE.value,
@@ -179,7 +179,7 @@ def dashboard():
     ended_total_income = sum(r["received_net_cents"] for r in ended_rows)
     ended_total_expense = sum(
         int(
-            db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+            db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0))
             .filter(
                 Transaction.project_id == r["project"].id,
                 Transaction.type == TransactionType.EXPENSE.value,
@@ -224,12 +224,12 @@ def dashboard():
     # 可分配盈余：全部项目利润合计（不含分红支出）
     surplus_cents = sum(
         r["received_net_cents"] - max(
-            int(db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+            int(db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0))
                .filter(Transaction.project_id == r["project"].id, Transaction.type == "expense",
                        Transaction.settled.is_(True), Transaction.is_void.is_(False),
                        Transaction.status == "active")
                .scalar() or 0)
-            - int(db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0))
+            - int(db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0))
                   .filter(Transaction.project_id == r["project"].id, Transaction.type == "expense",
                           Transaction.settled.is_(True), Transaction.is_void.is_(False),
                           Transaction.status == "active",
@@ -286,7 +286,7 @@ def reports():
     )
     income_cents_q = _apply_transaction_project_access_filter(income_cents_q)
     income_cents = income_cents_q.scalar() or 0
-    expense_cents_q = db.session.query(db.func.coalesce(db.func.sum(Transaction.amount_cents), 0)).filter(
+    expense_cents_q = db.session.query(db.func.coalesce(db.func.sum(expense_cash_expr()), 0)).filter(
         Transaction.type == TransactionType.EXPENSE.value,
         Transaction.is_void.is_(False),
         Transaction.status == "active",

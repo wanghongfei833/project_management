@@ -2711,6 +2711,49 @@ class TestPaymentWorkflow:
         assert tx.settled is True
         assert tx.payment_status == "paid"
 
+    def test_edit_paid_expense_syncs_cash_amount(self, client):
+        p = self._project("ProjEditPaidAmount")
+        seed = get_seed()
+        tx = Transaction(
+            project_id=p.id,
+            status="active",
+            type="expense",
+            amount_cents=100_000,
+            occur_date=date.today(),
+            settled=True,
+            fund_account=FundAccount.PUBLIC.value,
+            payment_status="closed",
+            paid_amount_cents=100_000,
+            paid_at=_utcnow(),
+            paid_by_user_id=seed["users"]["admin"],
+            payment_method="银行转账",
+            closed_at=_utcnow(),
+            counterparty="供应商",
+            note="原金额",
+            created_by_user_id=seed["users"]["admin"],
+        )
+        _db.session.add(tx)
+        _db.session.commit()
+
+        login(client, "admin", "admin123!")
+        client.post(
+            f"/transactions/{tx.id}/edit",
+            data={
+                "type": "expense",
+                "amount_yuan": "500.00",
+                "occur_date": date.today().isoformat(),
+                "settled": "y",
+                "fund_account": FundAccount.PUBLIC.value,
+                "counterparty": "供应商",
+                "recipient_user_id": 0,
+                "note": "修正为500",
+            },
+            follow_redirects=True,
+        )
+        _db.session.refresh(tx)
+        assert tx.amount_cents == 50_000
+        assert tx.paid_amount_cents == 50_000
+
     def test_admin_sees_payment_todo(self, client, monkeypatch):
         """待打款会进入财务待办，也会计入每晚短信的待办条数。"""
         seed = get_seed()

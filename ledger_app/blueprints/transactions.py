@@ -4,6 +4,17 @@ from ._common import *  # noqa: F401,F403
 from ..services.payments import PAYMENT_APPROVED, PAYMENT_PENDING
 
 
+def _sync_paid_amount_after_edit(tx: Transaction) -> None:
+    """已付款支出修改金额后同步实付金额，避免利润和账户余额口径分叉。"""
+    if (
+        tx.type == TransactionType.EXPENSE.value
+        and tx.settled
+        and tx.payment_status in ("paid", "closed")
+        and tx.paid_amount_cents is not None
+    ):
+        tx.paid_amount_cents = int(tx.amount_cents)
+
+
 
 @bp.get("/transactions")
 @login_required
@@ -264,6 +275,7 @@ def transactions_edit(transaction_id: int):
             tx.counterparty = req.new_counterparty
             tx.recipient_user_id = req.new_recipient_user_id
             tx.note = req.new_note
+            _sync_paid_amount_after_edit(tx)
             req.status = "executed"
             req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             req.executed_by_user_id = current_user.id
@@ -343,6 +355,7 @@ def transactions_edit_approve(transaction_id: int):
         tx.counterparty = req.new_counterparty
         tx.recipient_user_id = req.new_recipient_user_id
         tx.note = req.new_note
+        _sync_paid_amount_after_edit(tx)
         req.status = "executed"
         req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         req.executed_by_user_id = current_user.id
@@ -392,6 +405,7 @@ def transactions_edit_execute(transaction_id: int):
     tx.fund_account = req.new_fund_account
     tx.counterparty = req.new_counterparty
     tx.note = req.new_note
+    _sync_paid_amount_after_edit(tx)
 
     req.status = "executed"
     req.executed_at = datetime.now(timezone.utc).replace(tzinfo=None)
