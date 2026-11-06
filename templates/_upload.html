@@ -1,7 +1,7 @@
 {# 通用附件上传区：大号点击/拖拽区 + Ctrl+V 粘贴 + 提交前缩略图预览（点图放大）+ 清空。
    用法：{% from "_upload.html" import upload_field %} 然后 {{ upload_field("attachments_x") }} #}
 {% macro upload_field(input_id, extra_hint="", compact=false) %}
-  <div class="upload-zone{% if compact %} upload-zone-compact{% endif %}" id="{{ input_id }}-zone">
+  <div class="upload-zone{% if compact %} upload-zone-compact{% endif %}" id="{{ input_id }}-zone" tabindex="0">
     <input class="visually-hidden" type="file" name="attachments" id="{{ input_id }}" multiple>
     <div class="upload-cta" id="{{ input_id }}-cta">
       <div class="upload-icon">📎</div>
@@ -17,6 +17,7 @@
       <span class="small text-muted" id="{{ input_id }}-count"></span>
       <button type="button" class="btn btn-sm btn-link text-secondary d-none" id="{{ input_id }}-clear">清空</button>
     </div>
+    <div class="small mt-1 d-none" id="{{ input_id }}-paste-status"></div>
     <div class="row g-2 mt-2" id="{{ input_id }}-preview"></div>
     <div class="small text-danger mt-1 d-none" id="{{ input_id }}-warn">
       所选文件合计超过 25MB，提交会失败，请减少文件或先压缩。
@@ -35,6 +36,7 @@
     var pasteBtn = document.getElementById(id + "-paste");
     var clearBtn = document.getElementById(id + "-clear");
     var warnEl = document.getElementById(id + "-warn");
+    var pasteStatusEl = document.getElementById(id + "-paste-status");
     var MAX_TOTAL = 25 * 1024 * 1024;
     var dt = new DataTransfer();
 
@@ -48,6 +50,15 @@
       return (n / 1024 / 1024).toFixed(1) + " MB";
     }
     function sync() { input.files = dt.files; }
+    function setPasteStatus(text, kind) {
+      if (!pasteStatusEl) return;
+      pasteStatusEl.textContent = text || "";
+      pasteStatusEl.className = "small mt-1 " + (
+        kind === "error" ? "text-danger" :
+        kind === "success" ? "text-success" : "text-muted"
+      );
+      pasteStatusEl.classList.toggle("d-none", !text);
+    }
     function activate() {
       document.querySelectorAll(".upload-zone-active").forEach(function (el) {
         if (el !== zone) el.classList.remove("upload-zone-active");
@@ -120,36 +131,121 @@
       sync();
       render();
     }
+    function pastedFile(blob, index, suffix) {
+      var type = blob.type || "image/png";
+      var ext = type.split("/")[1].split("+")[0].replace("jpeg", "jpg");
+      return new File(
+        [blob],
+        "粘贴图片-" + Date.now() + "-" + index + "-" + suffix + "." + ext,
+        {type: type}
+      );
+    }
+
+    async function imageFromSource(src, index, suffix) {
+      if (!src) return null;
+      try {
+        var response = await fetch(src, {credentials: "include"});
+        if (!response.ok) return null;
+        var blob = await response.blob();
+        if ((blob.type || "").indexOf("image/") !== 0) return null;
+        return pastedFile(blob, index, suffix);
+      } catch (err) {
+        return null;
+      }
+    }
+
+    async function imagesFromHtml(html, index) {
+      if (!html) return [];
+      try {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var sources = Array.prototype.slice.call(doc.querySelectorAll("img"))
+          .map(function (img) { return img.getAttribute("src"); })
+          .filter(Boolean);
+        var files = [];
+        for (var i = 0; i < sources.length; i++) {
+          var file = await imageFromSource(sources[i], index, "html" + i);
+          if (file) files.push(file);
+        }
+        return files;
+      } catch (err) {
+        return [];
+      }
+    }
+
+    async function imagesFromClipboardItem(item, index) {
+      var types = item.types || [];
+      var files = [];
+      for (var i = 0; i < types.length; i++) {
+        if (types[i].indexOf("image/") !== 0) continue;
+        var blob = await item.getType(types[i]);
+        files.push(pastedFile(blob, index, String(i)));
+      }
+      if (files.length) return files;
+      if (types.indexOf("text/html") >= 0) {
+        var htmlBlob = await item.getType("text/html");
+        files = await imagesFromHtml(await htmlBlob.text(), index);
+      }
+      if (!files.length && types.indexOf("text/plain") >= 0) {
+        var textBlob = await item.getType("text/plain");
+        var text = (await textBlob.text()).trim();
+        if (/^data:image\//i.test(text) || /^https?:\/\/.+\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(text)) {
+          var file = await imageFromSource(text, index, "url");
+          if (file) files.push(file);
+        }
+      }
+      return files;
+    }
+
+    async function filesFromPasteData(data) {
+      if (!data) return [];
+      var direct = Array.prototype.slice.call(data.files || []);
+      if (direct.length) return direct;
+      var files = [];
+      var items = Array.prototype.slice.call(data.items || []);
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].kind === "file" && (items[i].type || "").indexOf("image/") === 0) {
+          var file = items[i].getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      if (files.length) return files;
+      try {
+        var html = data.getData("text/html");
+        if (html) files = await imagesFromHtml(html, "paste");
+      } catch (err) {
+        return files;
+      }
+      return files;
+    }
+
     async function pasteFromClipboard() {
       activate();
-      if (!navigator.clipboard || !navigator.clipboard.read) {
-        alert("当前浏览器不支持读取剪贴板，请点击页面后按 Ctrl+V 粘贴截图。");
+      zone.focus();
+      setPasteStatus("正在读取剪贴板…", "muted");
+      if (!window.isSecureContext || !navigator.clipboard || !navigator.clipboard.read) {
+        setPasteStatus("当前浏览器不能直接读取剪贴板。已开启粘贴模式，请直接按 Ctrl+V。", "error");
         return;
       }
       try {
         var clipboardItems = await navigator.clipboard.read();
         var pasted = [];
+        var typesSeen = [];
         for (var i = 0; i < clipboardItems.length; i++) {
-          var types = clipboardItems[i].types || [];
-          for (var j = 0; j < types.length; j++) {
-            var type = types[j];
-            if (type.indexOf("image/") !== 0) continue;
-            var blob = await clipboardItems[i].getType(type);
-            var ext = type.split("/")[1].replace("jpeg", "jpg");
-            pasted.push(new File(
-              [blob],
-              "粘贴图片-" + Date.now() + "-" + i + "." + ext,
-              {type: type}
-            ));
-          }
+          typesSeen = typesSeen.concat(clipboardItems[i].types || []);
+          pasted = pasted.concat(await imagesFromClipboardItem(clipboardItems[i], i));
         }
         if (!pasted.length) {
-          alert("剪贴板中没有图片文件，请先复制或截图。");
+          setPasteStatus(
+            "没有读到图片" + (typesSeen.length ? "（剪贴板格式：" + typesSeen.join("、") + "）" : "") +
+            "。已开启粘贴模式，请直接按 Ctrl+V。",
+            "error"
+          );
           return;
         }
         addFiles(pasted);
+        setPasteStatus("已从剪贴板加入 " + pasted.length + " 张图片。", "success");
       } catch (err) {
-        alert("无法读取剪贴板。请允许浏览器剪贴板权限，或点击页面后按 Ctrl+V。");
+        setPasteStatus("浏览器没有允许读取剪贴板。已开启粘贴模式，请直接按 Ctrl+V。", "error");
       }
     }
 
@@ -178,15 +274,28 @@
     zone.addEventListener("drop", function (e) {
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
     });
-    document.addEventListener("paste", function (e) {
+    document.addEventListener("paste", async function (e) {
       if (!document.body.contains(zone)) return;
+      if (e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable=true]")) return;
       var zones = document.querySelectorAll(".upload-zone");
       if (window._activeUploadZone && window._activeUploadZone !== zone) return;
       if (!window._activeUploadZone && zones.length > 1) return;
       var cb = e.clipboardData;
-      if (!cb || !cb.files || !cb.files.length) return;
+      if (!cb) return;
+      var types = Array.prototype.slice.call(cb.types || []);
+      var hasImage = types.some(function (type) { return type.indexOf("image/") === 0; });
+      var hasHtml = types.indexOf("text/html") >= 0;
+      if (!hasImage && !hasHtml) return;
       e.preventDefault();
-      addFiles(cb.files);
+      activate();
+      setPasteStatus("正在读取粘贴内容…", "muted");
+      var files = await filesFromPasteData(cb);
+      if (files.length) {
+        addFiles(files);
+        setPasteStatus("已粘贴 " + files.length + " 张图片。", "success");
+      } else {
+        setPasteStatus("粘贴内容中没有可识别的图片。", "error");
+      }
     });
     preview.addEventListener("click", function (e) {
       var box = e.target.closest(".upload-thumb");
