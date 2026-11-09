@@ -1,0 +1,536 @@
+{% extends "base.html" %}
+{% block title %}系统说明 - 项目账本{% endblock %}
+{% block content %}
+<style>
+  .guide-hero {
+    background: linear-gradient(135deg, #1a3a5c 0%, #315f8a 100%);
+    color: #fff;
+    border-radius: 16px;
+  }
+  .guide-sidebar {
+    position: sticky;
+    top: 1rem;
+  }
+  .guide-sidebar .nav-link {
+    color: #495057;
+    border-radius: 7px;
+    padding: .45rem .65rem;
+  }
+  .guide-sidebar .nav-link:hover {
+    color: var(--brand-primary);
+    background: rgba(26, 58, 92, .07);
+  }
+  .guide-section {
+    scroll-margin-top: 88px;
+  }
+  .guide-step {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    border-radius: 50%;
+    background: var(--brand-primary);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+  }
+  .guide-formula {
+    background: #f1f5f9;
+    border-left: 4px solid var(--brand-primary);
+    border-radius: 6px;
+    padding: .7rem .85rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+  }
+  .guide-kbd {
+    background: #eef2f6;
+    border: 1px solid #d5dce3;
+    border-radius: 5px;
+    padding: .1rem .35rem;
+    font-size: .82em;
+  }
+  .guide-empty {
+    display: none;
+  }
+</style>
+
+<div class="guide-hero p-4 mb-4 shadow-sm">
+  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+    <div>
+      <div class="small text-white-50 mb-1">管理员专属 · 使用教程与计算规则</div>
+      <h1 class="h3 mb-2"><i class="bi bi-book me-2"></i>项目账本系统说明</h1>
+      <div class="text-white-50">
+        本页说明系统当前如何运行、各类金额如何计算，以及日常操作中最容易理解错的地方。
+      </div>
+    </div>
+    <div class="text-end small text-white-50">
+      <div class="badge text-bg-warning text-dark mb-2">仅 admin 可见</div>
+      <div>更新日期：{{ guide_updated_at }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="alert alert-warning d-flex gap-2 align-items-start">
+  <i class="bi bi-info-circle mt-1"></i>
+  <div>
+    页面描述的是系统当前正式口径。若业务规则以后调整，应同步更新本页；系统页面、计算结果与本说明不一致时，以当时代码和数据库实际结果为准，并记录需要修正的一方。
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-3">
+    <div class="card guide-sidebar">
+      <div class="card-body">
+        <label for="guide-search" class="form-label small fw-semibold">搜索本页</label>
+        <input id="guide-search" class="form-control form-control-sm mb-3" type="search" placeholder="例如：中介费、资金池">
+        <div class="small text-muted mb-2">页面目录</div>
+        <nav class="nav flex-column small">
+          <a class="nav-link" href="#overview">1. 系统总览</a>
+          <a class="nav-link" href="#workflow">2. 日常使用流程</a>
+          <a class="nav-link" href="#project-links">3. 项目与父子关系</a>
+          <a class="nav-link" href="#transactions">4. 收入、支出与付款闭环</a>
+          <a class="nav-link" href="#finance-rules">5. 财务计算口径</a>
+          <a class="nav-link" href="#fund-pool">6. 对公账户与资金池</a>
+          <a class="nav-link" href="#dividend">7. 分红与个人收入</a>
+          <a class="nav-link" href="#permissions">8. 审批与权限</a>
+          <a class="nav-link" href="#reminders">9. 待办、日志与短信</a>
+          <a class="nav-link" href="#audit">10. 查询、报表与追溯</a>
+          <a class="nav-link" href="#admin-check">11. 管理员检查清单</a>
+        </nav>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-9">
+    <div id="guide-empty" class="alert alert-secondary guide-empty">
+      没有找到与搜索内容相关的说明。
+    </div>
+
+    <section id="overview" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-grid me-2"></i>1. 系统总览</div>
+      <div class="card-body">
+        <p>系统围绕“项目”形成一套完整的项目账本，而不只是记录一笔笔收支。核心对象包括：</p>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="border rounded p-3 h-100">
+              <div class="fw-semibold mb-2">项目层</div>
+              <div class="small text-muted">
+                合同应收、追加应收、项目成员、负责人、计划周期、父子关联、项目状态和日志规则。
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="border rounded p-3 h-100">
+              <div class="fw-semibold mb-2">资金层</div>
+              <div class="small text-muted">
+                收入、支出、付款审批、财务打款、回单闭环、对公账户、项目资金池和内部资金划转。
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="border rounded p-3 h-100">
+              <div class="fw-semibold mb-2">人员层</div>
+              <div class="small text-muted">
+                普通成员、项目负责人、财务权限、admin、项目人员报酬和分红收入。
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="border rounded p-3 h-100">
+              <div class="fw-semibold mb-2">提醒层</div>
+              <div class="small text-muted">
+                网页待办弹窗、审批待办、财务待办、日志待办、每晚短信提醒和短信发送溯源。
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-signpost-split me-2"></i>2. 日常使用流程</div>
+      <div class="card-body">
+        <div class="d-flex gap-3 mb-3">
+          <span class="guide-step">1</span>
+          <div>
+            <div class="fw-semibold">先建项目和人员</div>
+            <div class="small text-muted">在“用户”中创建成员并填写手机号；创建项目时设置合同金额、负责人、项目成员、周期、中介费规则和是否启用分红。</div>
+          </div>
+        </div>
+        <div class="d-flex gap-3 mb-3">
+          <span class="guide-step">2</span>
+          <div>
+            <div class="fw-semibold">再登记收入或支出</div>
+            <div class="small text-muted">收入要选择到账账户；支出必须进入付款审批和打款闭环。凭证可通过拖拽、选择文件或 <span class="guide-kbd">Ctrl+V</span> 粘贴。</div>
+          </div>
+        </div>
+        <div class="d-flex gap-3 mb-3">
+          <span class="guide-step">3</span>
+          <div>
+            <div class="fw-semibold">处理审批、打款和回单</div>
+            <div class="small text-muted">审批通过后由财务打款，填写实付金额和付款方式；收到银行回单后上传并完成闭环。</div>
+          </div>
+        </div>
+        <div class="d-flex gap-3 mb-3">
+          <span class="guide-step">4</span>
+          <div>
+            <div class="fw-semibold">持续维护日志和待办</div>
+            <div class="small text-muted">项目负责人或 admin 配置日志撰写人和星期频率；系统按北京时间每天 20:00 检查未完成日志和未处理事项。</div>
+          </div>
+        </div>
+        <div class="d-flex gap-3">
+          <span class="guide-step">5</span>
+          <div>
+            <div class="fw-semibold">项目终止后再处理分红</div>
+            <div class="small text-muted">只有已终止且启用分红的项目可以登记分红；分红会生成支出流水，并同步进入个人收入。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="project-links" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-diagram-3 me-2"></i>3. 项目与父子关系</div>
+      <div class="card-body">
+        <h2 class="h6">3.1 父子项目解决什么问题</h2>
+        <p class="small text-muted mb-3">
+          父项目用于汇总一个总包或总合同下的多个项目；子项目仍是独立项目，有自己的合同、成员、流水、资金池和分红。
+          关联关系不产生虚假的“父项目给子项目付款”流水。
+        </p>
+        <div class="guide-formula mb-3">父项目总应收 = 父项目自身应收 + 所有生效关联子项目的当前应收
+父项目累计入账 = 父项目自身入账 + 所有关联子项目累计入账
+父项目未收余额 = 父项目自身未收 + 所有关联子项目未收</div>
+        <h2 class="h6">3.2 金额是动态计算的</h2>
+        <p class="small mb-2">
+          关联不复制、不写死子项目金额。子项目合同金额或追加应收发生变化后，父项目汇总金额会实时重新计算。
+        </p>
+        <div class="alert alert-light border small mb-3">
+          示例：父项目自身应收 10 万，子项目应收 5 万，则父项目汇总应收 15 万；子项目后来增加到 6 万，父项目自动变为 16 万。
+        </div>
+        <h2 class="h6">3.3 隐藏关系与权限隔离</h2>
+        <ul class="small mb-0">
+          <li>只有内置账号 <strong>admin</strong> 可以建立、结束父子项目关联，其他 admin 角色不能管理“关联”。</li>
+          <li>子项目页面、导出、日志和成员界面不显示父项目，子项目成员不会知道关联关系。</li>
+          <li>父子关系本身不授予任何账务访问权。成员只能查看自己实际加入的项目。</li>
+          <li>父项目能显示关联项目节点；如果没有某个子项目的成员权限，就不能进入该子项目的账务。</li>
+          <li>子项目只能有一个当前生效父项目；系统阻止自关联和循环关联。</li>
+          <li>项目存在生效关联时，不能直接删除父项目或子项目，必须先结束关联。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="transactions" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>4. 收入、支出与付款闭环</div>
+      <div class="card-body">
+        <div class="table-responsive mb-3">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr><th>业务</th><th>登记方式</th><th>对统计的影响</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>外部收入</td>
+                <td>选择项目、到账账户和到账状态；未到账收入由财务确认。</td>
+                <td>已生效、已结算、未作废的收入计入累计入账和账户余额。</td>
+              </tr>
+              <tr>
+                <td>真实支出</td>
+                <td>发起付款申请，审批后由财务打款并上传回单。</td>
+                <td>实际支出优先使用财务填写的“实付金额”，影响利润和对应账户余额。</td>
+              </tr>
+              <tr>
+                <td>账户内部划转</td>
+                <td>对公账户和项目资金池之间转账。</td>
+                <td>不是收入，也不是支出；不改变项目利润，只改变资金所在账户。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <h2 class="h6">4.1 支出强制闭环</h2>
+        <div class="guide-formula mb-3">发起付款/报销申请
+  → 管理员或项目负责人同意
+  → 财务待打款
+  → 财务填写实付金额、付款方式
+  → 上传银行回单或付款凭证
+  → 已闭环</div>
+        <p class="small mb-3">
+          无论发起人是普通成员、负责人还是管理员，支出都不能在登记时直接跳过审批和打款。
+          财务打款不会新增第二笔流水，而是把原申请流水推进到已结算状态，避免重复记账。
+        </p>
+        <h2 class="h6">4.2 收入到账与回单</h2>
+        <p class="small mb-0">
+          未到账收入会进入财务“待确认到账”；财务确认后变为已到账。如果确认到账时还没有回单，会进入“待补回单”，
+          上传凭证后才完成闭环。单次提交的附件合计不能超过 25 MB，支持多选、拖拽和剪贴板粘贴。
+        </p>
+      </div>
+    </section>
+
+    <section id="finance-rules" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-calculator me-2"></i>5. 财务计算口径</div>
+      <div class="card-body">
+        <h2 class="h6">5.1 合同应收与追加应收</h2>
+        <div class="guide-formula mb-3">项目基础应收 = 项目合同金额 + 已生效或已执行的追加应收</div>
+        <p class="small text-muted">
+          父项目页面中的“总应收”还会额外加上当前生效关联子项目的应收。
+        </p>
+
+        <h2 class="h6">5.2 中介费与净应收</h2>
+        <div class="guide-formula mb-3">按比例中介费 = 合同应收 × 中介比例
+按固定金额中介费 = min(固定中介费, 合同应收)
+预期净应收 = max(合同应收 − 预期中介费, 0)</div>
+        <div class="table-responsive mb-3">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr><th>中介模式</th><th>典型入账方式</th><th>我方净额的理解</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>中介先扣</td>
+                <td>银行流水通常只记录到我方的净额。</td>
+                <td>到账金额本身已经扣过中介费，不再重复扣一次。</td>
+              </tr>
+              <tr>
+                <td>我方另付</td>
+                <td>客户通常把合同全额打给我方，我方再单独支付中介费。</td>
+                <td>到账全额要扣除对应中介费后，才是我方净收入。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 class="h6">5.3 未收余额与我方未收净额</h2>
+        <div class="guide-formula mb-3">客户侧剩余应收 = max(合同应收 − 客户侧累计到账, 0)
+还欠中介费 = max(预期中介费总额 − 已实际支付中介费, 0)
+我方未收净额（现金口径）= max(客户侧剩余应收 − 还欠中介费, 0)</div>
+        <div class="alert alert-light border small mb-3">
+          示例：合同 10 万、中介费 1 万。客户已到账 5 万、中介费还没支付，
+          则客户侧还剩 5 万，但我方还能真正收到手的现金口径是 4 万。中介费已经付清后，这两个数字相同。
+        </div>
+
+        <h2 class="h6">5.4 支出、利润和余额</h2>
+        <div class="guide-formula mb-3">实际支出 = 财务实付金额（没有实付金额时才回退到申请金额）
+项目已实现净利润 = 我方已收净额 − 已实际支出
+项目全部回款后的预计利润 = 预期净应收 − 已实际支出</div>
+        <p class="small mb-0">
+          只有已生效、已结算且未作废的流水进入收入、支出和余额统计。审批中、待打款、未到账或已作废的流水不会提前改变账目。
+        </p>
+      </div>
+    </section>
+
+    <section id="fund-pool" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-wallet2 me-2"></i>6. 对公账户与项目资金池</div>
+      <div class="card-body">
+        <p class="small">
+          每个项目有两个虚拟资金账户：<strong>对公账户</strong>和<strong>项目资金池</strong>。
+          资金池表示项目内可独立支配的资金，不是额外收入，也不是个人收入。
+        </p>
+        <div class="guide-formula mb-3">对公余额 =
+对公收入 − 对公支出 + 资金池转回对公 − 对公转入资金池
+
+资金池余额 =
+资金池收入 − 资金池支出 + 对公转入资金池 − 资金池转回对公
+
+项目可用资金 = 对公余额 + 资金池余额</div>
+        <h2 class="h6">工资代发如何拆账</h2>
+        <p class="small mb-2">
+          如果一笔工资转账同时包含真实工资成本和代管项目资金，必须拆成两类记录：
+        </p>
+        <div class="guide-formula mb-3">真实工资 5,000：登记为支出（对公付款）
+代管项目资金 45,000：登记为对公账户 → 项目资金池的内部划转
+
+不能把全部 50,000 都登记成支出，也不能全部登记成资金划转。</div>
+        <ul class="small mb-0">
+          <li>资金划转不计入收入、支出和项目利润。</li>
+          <li>资金划转可以上传银行流水、工资单、转账截图等凭证。</li>
+          <li>资金划转可撤销；撤销后两个账户余额自动恢复。</li>
+          <li>负责人、admin 或具备财务权限的人可以管理资金池和划转。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="dividend" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-pie-chart me-2"></i>7. 分红与个人收入</div>
+      <div class="card-body">
+        <h2 class="h6">7.1 分红条件</h2>
+        <ul class="small mb-3">
+          <li>项目必须已经终止。</li>
+          <li>项目必须启用“独立分红”。</li>
+          <li>可分红对象为该项目的非 admin 成员。</li>
+          <li>分红总额不能超过剩余可分红额度，也不能超过项目当前可用结余。</li>
+        </ul>
+        <div class="guide-formula mb-3">可分红基数 = max(我方已收净额 − 非分红实际支出, 0)
+已分红 = 分红明细合计 与 [DIVIDEND] 支出流水合计 的较大值
+剩余可分红 = max(可分红基数 − 已分红, 0)</div>
+        <p class="small">
+          确认分红后，系统会生成一笔支出流水，并写入每位成员的分红明细，避免“账上扣了钱但个人收入没有记录”。
+        </p>
+        <h2 class="h6">7.2 个人收入口径</h2>
+        <p class="small mb-0">
+          “个人收入”由两部分组成：<strong>项目人员报酬</strong>和<strong>分红收入</strong>。
+          报酬来自已结算支出中指定给该成员为收款人的记录；分红来自正式分红明细。
+          日期筛选按项目实际终止时间统计，进行中项目默认不参与，可勾选“包含进行中项目的收入”。
+        </p>
+      </div>
+    </section>
+
+    <section id="permissions" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-shield-lock me-2"></i>8. 审批与权限</div>
+      <div class="card-body">
+        <h2 class="h6">8.1 审批规则</h2>
+        <div class="guide-formula mb-3">管理员同意 或 项目负责人同意 = 审批通过</div>
+        <p class="small">
+          发起人自己不会成为额外审批障碍。管理员或项目负责人直接发起事项时，系统按已有权限直接生效，
+          但仍需遵守支出必须经过财务打款与回单闭环的规则。
+        </p>
+        <h2 class="h6">8.2 账号与权限</h2>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr><th>权限</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>admin</td><td>可查看全部项目和管理全站；默认具备财务权限；可创建、编辑、禁用和删除用户。</td></tr>
+              <tr><td>普通成员</td><td>只能访问自己实际加入的项目；可以发起事项，但是否立即生效取决于审批规则。</td></tr>
+              <tr><td>项目负责人</td><td>可审批本项目事项，默认承担本项目财务打款和到账确认职责。</td></tr>
+              <tr><td>财务权限</td><td>admin 默认拥有，也可以在用户编辑中单独授权普通成员打款和确认到账。</td></tr>
+              <tr><td>内置 admin</td><td>唯一可以管理隐藏父子项目关联的账号；不能删除或降级。</td></tr>
+              <tr><td>停用账号</td><td>不能登录，也不会收到自动短信；历史流水仍保留。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="alert alert-light border small mt-3 mb-0">
+          用户管理支持按启用状态、姓名或手机号搜索筛选。新增用户必须维护对应手机号，否则该用户不会收到短信提醒；
+          旧用户可由 admin 在编辑页补充。admin 自身不需要短信时可以不填手机号。
+        </div>
+      </div>
+    </section>
+
+    <section id="reminders" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-bell me-2"></i>9. 待办、日志与短信</div>
+      <div class="card-body">
+        <h2 class="h6">9.1 网页待办</h2>
+        <p class="small">
+          登录后如有待审批、待打款、待补回单、待确认到账或当天未写日志，系统会弹出待办窗口。
+          顶部“待办”导航同时显示红色、黄色和蓝色角标。
+        </p>
+        <h2 class="h6">9.2 日志撰写规则</h2>
+        <ul class="small">
+          <li>项目详情页 →“日志撰写规则”可以添加指定成员。</li>
+          <li>频率按周一至周日多选；七天全选即每天撰写。</li>
+          <li>同一个人重复添加时会更新频率，不会产生重复规则。</li>
+          <li>只有 admin 或项目负责人可以维护规则，撰写人必须是项目成员。</li>
+          <li>项目终止后不再产生日志提醒。</li>
+        </ul>
+        <h2 class="h6">9.3 每晚短信提醒</h2>
+        <div class="guide-formula mb-3">每天北京时间 20:00 检查一次
+待审批 + 财务待办 + 当天未写日志
+→ 按人合并成一条短信
+→ 同一人同一天最多自动发送一次</div>
+        <ul class="small mb-0">
+          <li>只有账号启用并且填写了手机号的人才会收到。</li>
+          <li>短信会把一个人当天所有未完成事项合并，不会按事项逐条轰炸。</li>
+          <li>admin 的“短信”页面可以查看发送明细、失败原因，并按项目追溯发给谁、发了多少条。</li>
+          <li>短信模板使用阿里云已审核模板；模板变量由系统按待办条数和最长积压小时数生成。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="audit" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-search me-2"></i>10. 查询、报表与追溯</div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr><th>功能</th><th>用途</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>全局搜索</td>
+                <td>可按项目名、流水编号、备注、对方、发起人、收款人、金额和凭证文件名查找，并遵守当前账号的项目权限。</td>
+              </tr>
+              <tr>
+                <td>项目操作记录</td>
+                <td>项目详情页记录新建、编辑、审批、付款、资金划转、配置变化等关键操作，便于追溯是谁在何时改了什么。</td>
+              </tr>
+              <tr>
+                <td>报表</td>
+                <td>按日期范围查看收入、支出和净额趋势、支出对象结构及流水明细。</td>
+              </tr>
+              <tr>
+                <td>CSV 导出</td>
+                <td>可导出流水、项目汇总和付款台账；财务台账包含申请、闭环状态、实付、付款方式、回单和驳回原因。</td>
+              </tr>
+              <tr>
+                <td>短信溯源</td>
+                <td>按项目查看短信发送总数、涉及人数、具体收件人、发送时间、状态、触发方式和失败原因。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="admin-check" class="card mb-4 guide-section" data-guide-section>
+      <div class="card-header"><i class="bi bi-clipboard-check me-2"></i>11. 管理员检查清单</div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="border rounded p-3 h-100">
+              <div class="fw-semibold mb-2">账目异常时</div>
+              <ol class="small mb-0 ps-3">
+                <li>检查流水是否已生效、已结算、未作废。</li>
+                <li>支出检查财务实付金额，而不是只看申请金额。</li>
+                <li>检查项目的中介费方向、比例或固定金额。</li>
+                <li>检查资金划转是否被误录成收入或支出。</li>
+                <li>检查父子项目是否造成重复查看或重复理解。</li>
+              </ol>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="border rounded p-3 h-100">
+              <div class="fw-semibold mb-2">人员或提醒异常时</div>
+              <ol class="small mb-0 ps-3">
+                <li>确认账号启用且手机号正确。</li>
+                <li>确认用户是该项目的实际成员。</li>
+                <li>确认项目负责人是否设置正确。</li>
+                <li>确认日志规则的成员和星期是否正确。</li>
+                <li>到“短信”页面查看跳过原因或阿里云失败原因。</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+        <div class="alert alert-warning small mt-3 mb-0">
+          修改用户、负责人、项目合同、中介费或父子关联前，应先核对历史流水和已有审批。系统会实时重算统计，
+          但不会自动修改已经发生的历史交易。
+        </div>
+      </div>
+    </section>
+
+    <div class="text-muted small text-center pb-4">
+      项目账本 · 管理员系统说明 · {{ guide_updated_at }}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var search = document.getElementById('guide-search');
+    var sections = Array.prototype.slice.call(document.querySelectorAll('[data-guide-section]'));
+    var empty = document.getElementById('guide-empty');
+    if (!search || !sections.length) return;
+
+    search.addEventListener('input', function () {
+      var query = (search.value || '').trim().toLowerCase();
+      var visible = 0;
+      sections.forEach(function (section) {
+        var matched = !query || section.textContent.toLowerCase().indexOf(query) >= 0;
+        section.classList.toggle('d-none', !matched);
+        if (matched) visible += 1;
+      });
+      if (empty) empty.classList.toggle('guide-empty', visible > 0);
+    });
+  })();
+</script>
+{% endblock %}

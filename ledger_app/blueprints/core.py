@@ -82,6 +82,19 @@ def approvals_list():
     )
 
 
+@bp.get("/admin/guide")
+@login_required
+def admin_guide():
+    """管理员专用的系统使用与计算规则说明。"""
+    if not is_admin():
+        abort(403)
+    return render_template(
+        "admin_guide.html",
+        guide_updated_at="2026-11-09",
+        is_admin=True,
+    )
+
+
 @bp.route("/me/password", methods=["GET", "POST"])
 @login_required
 def change_password():

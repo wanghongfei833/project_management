@@ -219,6 +219,22 @@ class TestDashboard:
         )
 
 
+class TestAdminGuide:
+    def test_admin_can_open_guide(self, client):
+        login(client, "admin", "admin123!")
+        rv = client.get("/admin/guide")
+        assert rv.status_code == 200
+        html = rv.get_data(as_text=True)
+        assert 'id="project-links"' in html
+        assert 'id="finance-rules"' in html
+        assert "管理员同意 或 项目负责人同意" in html
+
+    def test_non_admin_cannot_open_guide(self, client):
+        login(client, "wang")
+        rv = client.get("/admin/guide")
+        assert rv.status_code == 403
+
+
 class TestParentChild:
     def test_create_child_project(self, client):
         login(client, "admin", "admin123!")
