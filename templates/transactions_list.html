@@ -26,51 +26,75 @@
   </form>
 
   <div class="table-responsive">
-    <table class="table table-sm align-middle">
+    <table class="table data-table align-middle">
       <thead>
         <tr>
           <th>日期</th>
           <th>项目</th>
-          <th>类型</th>
-          <th>资金账户</th>
-          <th>金额</th>
-          <th>状态</th>
-          <th>对方</th>
+          <th>流水</th>
+          <th>账户与状态</th>
+          <th>对方与备注</th>
           <th>凭证</th>
           <th class="text-end">操作</th>
         </tr>
       </thead>
       <tbody>
         {% for t in transactions %}
-          <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
-            <td>{{ t.occur_date }}</td>
-            <td>{{ t.project.name if t.project else '（无）' }}</td>
-            <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
-            <td><span class="badge text-bg-light border text-muted">{{ fund_account_label(t.fund_account) }}</span></td>
-            <td>¥ {{ t.amount_cents|money }}</td>
+          <tr>
+            <td class="text-nowrap">{{ t.occur_date }}</td>
             <td>
-              {% if t.type == 'income' %}
-                {% if t.settled %}
-                  <span class="badge text-bg-success-subtle text-success border-success-subtle">已到账</span>
-                {% else %}
-                  <span class="badge text-bg-warning-subtle text-warning border-warning-subtle">未到账</span>
-                {% endif %}
-              {% elif t.payment_status == 'pending' %}
-                <span class="badge text-bg-warning">待审批</span>
-              {% elif t.payment_status == 'approved' %}
-                <span class="badge text-bg-info">待打款</span>
-              {% elif t.payment_status == 'paid' %}
-                <span class="badge text-bg-info">待补回单</span>
-              {% elif t.settled %}
-                <span class="badge text-bg-success-subtle text-success border-success-subtle">已付款</span>
+              {% if t.project %}
+                <a class="cell-main text-decoration-none" href="{{ url_for('main.project_detail', project_id=t.project.id) }}">{{ t.project.name }}</a>
               {% else %}
-                <span class="badge text-bg-warning-subtle text-warning border-warning-subtle">未付款</span>
+                <span class="text-muted">（无项目）</span>
               {% endif %}
             </td>
-            <td>{% if t.counterparty == '项目人员' and t.recipient_user %}{{ t.recipient_user.username }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                <span class="flow-direction {{ t.type }}">
+                  <i class="bi bi-{{ 'arrow-down-left' if t.type == 'income' else 'arrow-up-right' }}"></i>
+                </span>
+                <div>
+                  <div class="small text-muted">{{ '收入' if t.type == 'income' else '支出' }}</div>
+                  <div class="{% if t.type == 'income' %}flow-income{% else %}flow-expense{% endif %}">
+                    {{ '+' if t.type == 'income' else '−' }} ¥ {{ t.amount_cents|money }}
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td>
+              <span class="badge text-bg-light border text-muted mb-1">{{ fund_account_label(t.fund_account) }}</span>
+              <div>
+                {% if t.type == 'income' %}
+                  {% if t.settled %}
+                    <span class="badge text-bg-success">已到账</span>
+                  {% else %}
+                    <span class="badge text-bg-warning">未到账</span>
+                  {% endif %}
+                {% elif t.payment_status == 'pending' %}
+                  <span class="badge text-bg-warning">待审批</span>
+                {% elif t.payment_status == 'approved' %}
+                  <span class="badge text-bg-info">待打款</span>
+                {% elif t.payment_status == 'paid' %}
+                  <span class="badge text-bg-info">待补回单</span>
+                {% elif t.settled %}
+                  <span class="badge text-bg-success">已付款</span>
+                {% else %}
+                  <span class="badge text-bg-warning">未付款</span>
+                {% endif %}
+              </div>
+            </td>
+            <td>
+              <div class="cell-main">
+                {% if t.counterparty == '项目人员' and t.recipient_user %}{{ t.recipient_user.username }}{% else %}{{ t.counterparty or '未填写对方' }}{% endif %}
+              </div>
+              <div class="cell-sub text-truncate" style="max-width:280px;" title="{{ t.note or '' }}">{{ t.note or '无备注' }}</div>
+            </td>
             <td>
               {% for a in t.attachments %}
-                <div><a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a></div>
+                <div class="text-truncate" style="max-width:220px;">
+                  <a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank"><i class="bi bi-paperclip me-1"></i>{{ a.filename }}</a>
+                </div>
               {% else %}
                 <span class="text-muted">无</span>
               {% endfor %}
@@ -89,11 +113,13 @@
                 {% endif %}
               {% elif is_admin and t.project_id %}
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.transactions_edit', transaction_id=t.id) }}">修改</a>
+              {% else %}
+                <span class="text-muted">—</span>
               {% endif %}
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="9" class="text-muted">暂无流水</td></tr>
+          <tr><td colspan="7" class="text-muted">暂无流水</td></tr>
         {% endfor %}
       </tbody>
     </table>

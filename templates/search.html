@@ -29,7 +29,7 @@
   {% if projects %}
     <h2 class="h6 text-muted mb-2">项目（{{ projects|length }}）</h2>
     <div class="table-responsive mb-4">
-      <table class="table table-sm align-middle">
+      <table class="table data-table align-middle">
         <thead><tr><th>项目</th><th>状态</th><th class="text-end">操作</th></tr></thead>
         <tbody>
           {% for p in projects %}
@@ -49,7 +49,7 @@
   {% if transactions %}
     <h2 class="h6 text-muted mb-2">流水（{{ transactions|length }}）</h2>
     <div class="table-responsive mb-4">
-      <table class="table table-sm align-middle">
+      <table class="table data-table align-middle">
         <thead>
           <tr>
             <th>日期</th><th>项目</th><th>类型</th><th class="text-end">金额</th>
@@ -84,7 +84,7 @@
   {% if attachment_transactions %}
     <h2 class="h6 text-muted mb-2">凭证文件名命中（{{ attachment_transactions|length }}）</h2>
     <div class="table-responsive mb-4">
-      <table class="table table-sm align-middle">
+      <table class="table data-table align-middle">
         <thead><tr><th>日期</th><th>项目</th><th class="text-end">金额</th><th>命中的凭证</th></tr></thead>
         <tbody>
           {% for t in attachment_transactions %}

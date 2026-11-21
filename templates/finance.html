@@ -15,7 +15,7 @@
   {% if finance %}
     <h2 class="h6 text-muted mt-4 mb-2">待打款（{{ payments|length }}）</h2>
     <div class="table-responsive mb-4">
-      <table class="table table-sm align-middle">
+      <table class="table data-table align-middle">
         <thead>
           <tr>
             <th>项目</th><th>用途 / 说明</th><th class="text-end">申请金额</th><th>付款账户</th>
@@ -68,7 +68,7 @@
 
   <h2 class="h6 text-muted mt-4 mb-2">待补回单（{{ receipts|length }}）</h2>
   <div class="table-responsive mb-4">
-    <table class="table table-sm align-middle">
+    <table class="table data-table align-middle">
       <thead>
         <tr>
           <th>项目</th><th class="text-end">金额</th><th class="text-end">实付</th>
@@ -107,7 +107,7 @@
   {% if finance %}
     <h2 class="h6 text-muted mt-4 mb-2">待确认到账（{{ incomes|length }}）</h2>
     <div class="table-responsive mb-4">
-      <table class="table table-sm align-middle">
+      <table class="table data-table align-middle">
         <thead><tr><th>项目</th><th>对方</th><th class="text-end">金额</th><th>日期</th><th class="text-end">操作</th></tr></thead>
         <tbody>
           {% for item in incomes %}
@@ -133,8 +133,8 @@
     </div>
 
     <h2 class="h6 text-muted mt-4 mb-2">最近闭环</h2>
-    <div class="table-responsive">
-      <table class="table table-sm align-middle">
+    <div class="table-responsive" style="max-height:420px;overflow-y:auto;">
+      <table class="table data-table align-middle">
         <thead><tr><th>项目</th><th>类型</th><th class="text-end">金额</th><th>付款/到账时间</th><th>闭环时间</th><th>状态</th></tr></thead>
         <tbody>
           {% for tx in closed %}

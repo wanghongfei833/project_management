@@ -1,6 +1,32 @@
 {% extends "base.html" %}
 {% block title %}{{ project.name }} · 日志{% endblock %}
 {% block content %}
+<style>
+  .project-log-browser {
+    overflow: hidden;
+    border: 1px solid #e5e9ef !important;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 5px 20px rgba(23, 32, 51, .055);
+  }
+  .project-log-browser .list-group-item {
+    padding: .75rem 1rem;
+    border-color: #edf0f3;
+  }
+  .project-log-browser .list-group-item.active {
+    color: #fff;
+    border-color: var(--brand-primary);
+    background: var(--brand-primary);
+  }
+  .project-log-browser .log-reader {
+    min-height: 520px;
+    padding: 1.5rem;
+  }
+  .project-log-browser .log-body {
+    color: #44505f;
+    line-height: 1.85;
+  }
+</style>
   <div class="d-flex justify-content-between align-items-start mb-3">
     <div>
       <h1 class="h4 mb-1">{{ project.name }}</h1>
@@ -12,7 +38,7 @@
     <a class="btn btn-sm btn-primary" href="{{ url_for('main.project_logs_new', project_id=project.id) }}">+ 新增日志</a>
   </div>
 
-  <div class="row g-0 border rounded" style="min-height: 500px;">
+  <div class="row g-0 project-log-browser" style="min-height: 500px;">
     {# 左侧目录 #}
     <div class="col-md-4 border-end" style="overflow-y: auto; max-height: 600px;">
       <div class="list-group list-group-flush">
@@ -33,13 +59,13 @@
     {# 右侧详情 #}
     <div class="col-md-8">
       {% if current_log %}
-        <div class="p-4">
+        <div class="log-reader">
           <div class="d-flex align-items-center gap-2 mb-1">
             <span class="badge rounded-pill text-bg-light">{{ current_log.created_at.strftime('%Y-%m-%d %H:%M') if current_log.created_at else '' }}</span>
             <span class="fw-semibold">{{ current_log.author.username if current_log.author else '?' }}</span>
           </div>
           <div class="fs-5 fw-bold mb-3">{{ current_log.title or '（无标题）' }}</div>
-          <div class="mb-3" style="white-space: pre-wrap; line-height: 1.7;">{{ current_log.body }}</div>
+          <div class="mb-3 log-body" style="white-space: pre-wrap;">{{ current_log.body }}</div>
           {% if current_log.attachments %}
             <div class="d-flex flex-wrap gap-2">
               {% for a in current_log.attachments %}

@@ -61,7 +61,7 @@
         <form id="dividend-form" method="post" action="{{ url_for('main.project_dividend_post', project_id=project.id) }}" onsubmit="return validateDividend();">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="table-responsive">
-            <table class="table table-sm align-middle" id="dividend-table">
+            <table class="table data-table align-middle" id="dividend-table">
               <thead>
                 <tr>
                   <th style="width:40%;">姓名</th>
