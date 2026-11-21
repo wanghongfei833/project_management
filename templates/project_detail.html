@@ -160,6 +160,15 @@
     color: var(--project-primary);
     background: #edf3f8;
   }
+  .project-anchor-nav a.active {
+    color: #fff;
+    background: var(--project-primary);
+    box-shadow: 0 3px 10px rgba(31, 79, 120, .2);
+  }
+  .project-anchor-nav a.active .count {
+    color: var(--project-primary);
+    background: #fff;
+  }
   .project-anchor-nav .count {
     display: inline-flex;
     min-width: 18px;
@@ -170,6 +179,16 @@
     border-radius: 999px;
     background: #e9eef4;
     font-size: .68rem;
+  }
+  .project-anchor-nav .count.alert {
+    color: #fff;
+    background: #c47a00;
+  }
+  .project-tab-content > .tab-pane {
+    display: none;
+  }
+  .project-tab-content > .active {
+    display: block;
   }
   .project-kpi-grid {
     display: grid;
@@ -712,20 +731,19 @@
   {% endif %}
 
   <nav class="project-anchor-nav" aria-label="项目页面导航">
-    <a href="#overview"><i class="bi bi-grid me-1"></i>概览</a>
-    <a href="#finance"><i class="bi bi-calculator me-1"></i>应收与收支</a>
-    <a href="#funds"><i class="bi bi-wallet2 me-1"></i>资金账户</a>
-    {% if pending_transactions %}
-      <a href="#pending"><i class="bi bi-inbox me-1"></i>待审核<span class="count">{{ pending_transactions|length }}</span></a>
-    {% endif %}
-    <a href="#transactions"><i class="bi bi-list-ul me-1"></i>流水<span class="count">{{ tx_pagination.total }}</span></a>
-    <a href="#collaboration"><i class="bi bi-people me-1"></i>协作与日志</a>
-    {% if can_manage_log_rules or log_rule_rows or adjustments %}
-      <a href="#management"><i class="bi bi-sliders me-1"></i>项目管理</a>
-    {% endif %}
+    <a class="active" href="#overview" data-project-tab role="tab"><i class="bi bi-grid me-1"></i>概览</a>
+    <a href="#finance" data-project-tab role="tab"><i class="bi bi-calculator me-1"></i>财务</a>
+    <a href="#funds" data-project-tab role="tab"><i class="bi bi-wallet2 me-1"></i>资金</a>
+    <a href="#transactions" data-project-tab role="tab">
+      <i class="bi bi-list-ul me-1"></i>流水
+      <span class="count">{{ tx_pagination.total }}</span>
+      {% if pending_transactions %}<span class="count alert" title="待审核流水">{{ pending_transactions|length }}</span>{% endif %}
+    </a>
+    <a href="#collaboration" data-project-tab role="tab"><i class="bi bi-people me-1"></i>协作</a>
   </nav>
 
-  <section id="overview" class="project-section">
+  <div class="tab-content project-tab-content">
+  <section id="overview" class="tab-pane fade show active project-section" role="tabpanel">
     <div class="row g-3">
       <div class="col-xl-8">
         <div class="project-kpi-grid">
@@ -811,7 +829,7 @@
     </div>
   </section>
 
-  <section id="finance" class="project-section">
+  <section id="finance" class="tab-pane fade project-section" role="tabpanel">
     <div class="project-section-heading">
       <div>
         <h2><i class="bi bi-calculator me-1"></i>应收与收支</h2>
@@ -896,7 +914,7 @@
     {% include "_subcontracts.html" %}
   </section>
 
-  <section id="funds" class="project-section">
+  <section id="funds" class="tab-pane fade project-section" role="tabpanel">
     <div class="project-section-heading">
       <div>
         <h2><i class="bi bi-wallet2 me-1"></i>资金账户</h2>
@@ -906,6 +924,7 @@
     {% include "_fund_pool.html" %}
   </section>
 
+  <section id="transactions" class="tab-pane fade project-section" role="tabpanel">
   {% if pending_transactions %}
     <section id="pending" class="project-section">
       <div class="project-section-heading">
@@ -1001,7 +1020,7 @@
     </section>
   {% endif %}
 
-  <section id="transactions" class="project-section">
+  <div id="transaction-list" class="project-section">
     <div class="project-section-heading">
       <div>
         <h2><i class="bi bi-list-ul me-1"></i>项目流水</h2>
@@ -1207,9 +1226,11 @@
         </div>
       {% endif %}
     </div>
+  </div>
   </section>
 
-  <section id="collaboration" class="project-section">
+  <div id="collaboration" class="tab-pane fade" role="tabpanel">
+  <section class="project-section">
     <div class="project-section-heading">
       <div>
         <h2><i class="bi bi-people me-1"></i>协作与日志</h2>
@@ -1420,6 +1441,8 @@
       </div>
     </section>
   {% endif %}
+  </div>
+  </div>
 
   <div class="project-footer">
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.dashboard') }}"><i class="bi bi-arrow-left me-1"></i>返回首页</a>
@@ -1483,6 +1506,39 @@
 {% block scripts %}
 <script>
   (function () {
+    var projectTabs = Array.prototype.slice.call(document.querySelectorAll('[data-project-tab]'));
+    var projectPanes = Array.prototype.slice.call(document.querySelectorAll('.project-tab-content > .tab-pane'));
+
+    function showProjectTab(target) {
+      var pane = document.querySelector(target);
+      if (!pane) return false;
+      projectTabs.forEach(function (item) {
+        item.classList.toggle('active', item.getAttribute('href') === target);
+      });
+      projectPanes.forEach(function (item) {
+        item.classList.toggle('active', item === pane);
+        item.classList.toggle('show', item === pane);
+      });
+      return true;
+    }
+
+    function activateTabFromHash() {
+      if (window.location.hash) showProjectTab(window.location.hash);
+    }
+
+    projectTabs.forEach(function (trigger) {
+      trigger.addEventListener('click', function (event) {
+        event.preventDefault();
+        var target = trigger.getAttribute('href');
+        if (!showProjectTab(target)) return;
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, '', target);
+        }
+      });
+    });
+    activateTabFromHash();
+    window.addEventListener('hashchange', activateTabFromHash);
+
     var filterButtons = Array.prototype.slice.call(document.querySelectorAll('[data-log-filter]'));
     var logItems = Array.prototype.slice.call(document.querySelectorAll('[data-log-type]'));
 
