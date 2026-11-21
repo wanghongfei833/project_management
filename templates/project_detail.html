@@ -1,367 +1,995 @@
 {% extends "base.html" %}
-{% block title %}项目详情 - 项目账本{% endblock %}
+{% block title %}{{ project.name }} - 项目账本{% endblock %}
 {% block content %}
-  <div class="d-flex justify-content-between align-items-start mb-3">
-    <div>
-      <h1 class="h4 mb-1">{{ project.name }}</h1>
-      <div class="text-muted small">状态：{% if project.status == 'ended' %}<span class="text-danger fw-bold">已终止</span>{% elif project.status == 'open' %}进行中{% else %}已结束{% endif %}
-        {% if is_parent %}<span class="badge text-bg-secondary ms-1" style="font-size:.65rem;">{{ link_summary.children|length }} 个关联项目</span>{% endif %}
-      </div>
-    </div>
-    <div class="d-flex gap-2 flex-wrap align-items-center">
-      {% if is_admin and project.status != 'ended' %}
-        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.projects_edit', project_id=project.id) }}">编辑项目</a>
-        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.project_adjust', project_id=project.id) }}">追加应收</a>
-      {% endif %}
-      {% if project.status != 'ended' %}
-        <a class="btn btn-sm btn-primary" href="{{ url_for('main.transactions_new', project_id=project.id) }}">新增流水</a>
-      {% endif %}
-      {% set member_ids = members|map(attribute='id')|list %}
-      {% if project.status == 'ended' %}
-        <span class="badge text-bg-danger">已终止</span>
-      {% elif end_req %}
-        <span class="small text-muted">终止申请（{{ end_approved_ids|length }}/{{ approval_required_count }}）</span>
-        {% if current_user.id in end_approved_ids %}
-          <span class="badge text-bg-secondary">已同意</span>
-        {% elif current_user.id == project.leader_user_id or is_admin %}
-          <form method="post" action="{{ url_for('main.project_end_approve', project_id=project.id) }}" class="d-inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="submit">同意终止</button></form>
-        {% endif %}
-        {% if is_admin or end_req.created_by_user_id == current_user.id %}
-          <form method="post" action="{{ url_for('main.project_end_cancel', project_id=project.id) }}" class="d-inline" onsubmit="return confirm('确认取消终止申请？');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary" type="submit">取消</button></form>
-        {% endif %}
-      {% elif current_user.id in member_ids or is_admin %}
-        <form method="post" action="{{ url_for('main.project_end_request', project_id=project.id) }}" onsubmit="return confirm('确认发起终止项目申请？终止后项目将冻结为只读，不可再操作流水/分红等。');">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="submit">发起终止</button></form>
-      {% endif %}
-      {% if is_admin and not delete_req and project.status != 'ended' %}
-        <form method="post" action="{{ url_for('main.projects_delete_request', project_id=project.id) }}" onsubmit="return confirm('确认发起删除申请？');">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" type="submit">发起删除</button></form>
-      {% endif %}
-      {% if delete_req %}
-        {% set member_id_list = members|map(attribute='id')|list %}
-        {% if current_user.id in approved_user_ids %}
-          <span class="badge text-bg-secondary">已同意删除</span>
-        {% elif current_user.id == project.leader_user_id or is_admin %}
-          <form method="post" action="{{ url_for('main.projects_delete_approve', project_id=project.id) }}" onsubmit="return confirm('确认同意删除？');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger btn-sm" type="submit">同意删除</button></form>
-        {% endif %}
-        {% if is_admin and delete_can_execute %}
-          <form method="post" action="{{ url_for('main.projects_delete_execute', project_id=project.id) }}" onsubmit="return confirm('确认删除？');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-danger btn-sm" type="submit">执行删除</button></form>
-        {% endif %}
-        {% if is_admin %}
-          <form method="post" action="{{ url_for('main.projects_delete_cancel', project_id=project.id) }}" class="d-inline" onsubmit="return confirm('确认取消删除申请？');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary" type="submit">取消删除</button></form>
-        {% endif %}
-      {% endif %}
-    </div>
+{% set member_ids = members|map(attribute='id')|list %}
+{% set collection_pct = (received_net_cents / expected_net_cents * 100)|int if expected_net_cents > 0 else 0 %}
+{% set collection_pct = [collection_pct, 100]|min %}
+<style>
+  .project-workspace {
+    --project-ink: #172033;
+    --project-muted: #6b7280;
+    --project-line: #e5e9ef;
+    --project-surface: #ffffff;
+    --project-soft: #f5f7fa;
+    --project-primary: #1f4f78;
+    --project-green: #14804a;
+    --project-red: #c2414b;
+    --project-amber: #a66300;
+  }
+  .project-workspace .card {
+    border: 1px solid var(--project-line);
+    box-shadow: 0 5px 20px rgba(23, 32, 51, .055);
+  }
+  .project-workspace .card:hover {
+    box-shadow: 0 5px 20px rgba(23, 32, 51, .055);
+  }
+  .project-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    color: var(--project-muted);
+    font-size: .82rem;
+    margin-bottom: .75rem;
+  }
+  .project-breadcrumb a {
+    color: var(--project-muted);
+    text-decoration: none;
+  }
+  .project-hero {
+    position: relative;
+    overflow: hidden;
+    color: #fff;
+    border-radius: 18px;
+    padding: 1.5rem;
+    background:
+      radial-gradient(circle at 90% 15%, rgba(255, 255, 255, .14), transparent 28%),
+      linear-gradient(135deg, #173955 0%, #285f88 100%);
+    box-shadow: 0 12px 34px rgba(23, 57, 85, .18);
+  }
+  .project-hero::after {
+    content: "";
+    position: absolute;
+    width: 260px;
+    height: 260px;
+    border: 42px solid rgba(255, 255, 255, .055);
+    border-radius: 50%;
+    right: -100px;
+    bottom: -155px;
+  }
+  .project-hero-content {
+    position: relative;
+    z-index: 1;
+  }
+  .project-avatar {
+    width: 50px;
+    height: 50px;
+    flex: 0 0 50px;
+    border-radius: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, .13);
+    border: 1px solid rgba(255, 255, 255, .18);
+    font-size: 1.45rem;
+  }
+  .project-title {
+    font-size: 1.55rem;
+    line-height: 1.25;
+    font-weight: 700;
+    letter-spacing: -.02em;
+  }
+  .project-subtitle {
+    color: rgba(255, 255, 255, .72);
+    font-size: .86rem;
+    margin-top: .35rem;
+  }
+  .project-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    border-radius: 999px;
+    padding: .2rem .6rem;
+    font-size: .74rem;
+    font-weight: 600;
+    color: #dff7e8;
+    background: rgba(39, 174, 96, .2);
+    border: 1px solid rgba(100, 220, 150, .28);
+  }
+  .project-status-pill.ended {
+    color: #ffe4e6;
+    background: rgba(220, 53, 69, .2);
+    border-color: rgba(255, 145, 155, .3);
+  }
+  .project-hero-actions {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    flex-wrap: wrap;
+  }
+  .project-hero-actions .btn-light {
+    color: var(--project-primary);
+    font-weight: 600;
+  }
+  .project-meta-strip {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+    margin-top: 1.2rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, .14);
+    color: rgba(255, 255, 255, .78);
+    font-size: .82rem;
+  }
+  .project-meta-strip span {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+  }
+  .project-anchor-nav {
+    position: sticky;
+    top: .6rem;
+    z-index: 20;
+    display: flex;
+    gap: .25rem;
+    overflow-x: auto;
+    margin: 1rem 0 1.25rem;
+    padding: .35rem;
+    border: 1px solid var(--project-line);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 6px 18px rgba(23, 32, 51, .07);
+    backdrop-filter: blur(8px);
+    scrollbar-width: none;
+  }
+  .project-anchor-nav::-webkit-scrollbar { display: none; }
+  .project-anchor-nav a {
+    flex: 0 0 auto;
+    padding: .48rem .75rem;
+    border-radius: 8px;
+    color: #52606f;
+    font-size: .82rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .project-anchor-nav a:hover {
+    color: var(--project-primary);
+    background: #edf3f8;
+  }
+  .project-anchor-nav .count {
+    display: inline-flex;
+    min-width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    margin-left: .25rem;
+    border-radius: 999px;
+    background: #e9eef4;
+    font-size: .68rem;
+  }
+  .project-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .8rem;
+  }
+  .project-kpi {
+    position: relative;
+    overflow: hidden;
+    min-height: 124px;
+    padding: 1rem;
+    border-radius: 14px;
+    border: 1px solid var(--project-line);
+    background: #fff;
+    box-shadow: 0 4px 16px rgba(23, 32, 51, .045);
+  }
+  .project-kpi::after {
+    content: "";
+    position: absolute;
+    width: 52px;
+    height: 52px;
+    right: -16px;
+    top: -16px;
+    border-radius: 50%;
+    background: var(--kpi-soft, #eef3f7);
+  }
+  .project-kpi-label {
+    color: var(--project-muted);
+    font-size: .76rem;
+    font-weight: 600;
+  }
+  .project-kpi-value {
+    margin-top: .42rem;
+    color: var(--project-ink);
+    font-size: 1.35rem;
+    line-height: 1.2;
+    font-weight: 750;
+    letter-spacing: -.02em;
+  }
+  .project-kpi-note {
+    margin-top: .45rem;
+    color: #87909c;
+    font-size: .72rem;
+  }
+  .project-kpi.is-green { --kpi-soft: #e3f5ec; }
+  .project-kpi.is-green .project-kpi-value { color: var(--project-green); }
+  .project-kpi.is-red { --kpi-soft: #fbe9eb; }
+  .project-kpi.is-red .project-kpi-value { color: var(--project-red); }
+  .project-kpi.is-amber { --kpi-soft: #fff0d4; }
+  .project-kpi.is-amber .project-kpi-value { color: var(--project-amber); }
+  .project-side-card {
+    height: 100%;
+    border-radius: 14px;
+    border: 1px solid var(--project-line);
+    background: #fff;
+    padding: 1rem;
+    box-shadow: 0 4px 16px rgba(23, 32, 51, .045);
+  }
+  .project-side-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: .8rem;
+    font-weight: 700;
+    color: var(--project-ink);
+  }
+  .project-info-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .55rem 0;
+    border-bottom: 1px dashed #e7ebf0;
+    font-size: .82rem;
+  }
+  .project-info-row:last-child { border-bottom: 0; }
+  .project-info-label { color: var(--project-muted); }
+  .project-person-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+    margin-top: .55rem;
+  }
+  .project-person {
+    display: inline-flex;
+    align-items: center;
+    gap: .28rem;
+    padding: .25rem .5rem;
+    border-radius: 999px;
+    color: #4a5564;
+    background: #f1f4f7;
+    font-size: .72rem;
+  }
+  .project-person.leader {
+    color: #164e36;
+    background: #e5f5ec;
+  }
+  .project-section {
+    scroll-margin-top: 4.2rem;
+    margin-bottom: 1.25rem;
+  }
+  .project-section-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 1.5rem 0 .75rem;
+  }
+  .project-section-heading h2 {
+    margin: 0;
+    color: var(--project-ink);
+    font-size: 1.05rem;
+    font-weight: 750;
+  }
+  .project-section-heading p {
+    margin: .2rem 0 0;
+    color: var(--project-muted);
+    font-size: .76rem;
+  }
+  .project-panel {
+    overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid var(--project-line);
+    background: #fff;
+    box-shadow: 0 4px 16px rgba(23, 32, 51, .045);
+  }
+  .project-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .85rem 1rem;
+    border-bottom: 1px solid var(--project-line);
+    background: #fbfcfd;
+  }
+  .project-panel-title {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    color: var(--project-ink);
+    font-weight: 700;
+    font-size: .88rem;
+  }
+  .project-panel-title i { color: var(--project-primary); }
+  .project-panel-body { padding: 1rem; }
+  .project-finance-list {
+    display: grid;
+    gap: .15rem;
+  }
+  .project-finance-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .68rem .1rem;
+    border-bottom: 1px solid #edf0f3;
+  }
+  .project-finance-row:last-child { border-bottom: 0; }
+  .project-finance-label {
+    color: var(--project-muted);
+    font-size: .8rem;
+  }
+  .project-finance-label strong {
+    display: block;
+    color: #3d4857;
+    font-size: .82rem;
+    font-weight: 650;
+  }
+  .project-finance-value {
+    color: var(--project-ink);
+    font-size: .95rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .project-mini-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .65rem;
+  }
+  .project-mini-grid.three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .project-mini-stat {
+    min-height: 90px;
+    padding: .85rem;
+    border: 1px solid #e8ecf1;
+    border-radius: 11px;
+    background: #fbfcfd;
+  }
+  .project-mini-stat .label {
+    color: var(--project-muted);
+    font-size: .72rem;
+  }
+  .project-mini-stat .value {
+    margin-top: .35rem;
+    font-size: 1rem;
+    font-weight: 700;
+  }
+  .project-progress-track {
+    height: 7px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e9edf2;
+  }
+  .project-progress-track > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #2f6f9f, #1f8a59);
+  }
+  .project-attention {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: .8rem;
+    padding: .85rem 1rem;
+    border: 1px solid #f0d28c;
+    border-left: 4px solid #d28b00;
+    border-radius: 12px;
+    background: #fff9e9;
+  }
+  .project-attention.danger {
+    border-color: #efc8cc;
+    border-left-color: #c2414b;
+    background: #fff4f5;
+  }
+  .project-attention.ended {
+    border-color: #efc8cc;
+    border-left-color: #c2414b;
+    background: #fff7f7;
+  }
+  .project-actions {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    flex-wrap: wrap;
+  }
+  .project-table {
+    margin: 0;
+    font-size: .8rem;
+  }
+  .project-table thead th {
+    padding: .68rem .6rem;
+    border-bottom: 1px solid #dfe4ea;
+    color: #748092;
+    font-size: .69rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    white-space: nowrap;
+  }
+  .project-table tbody td {
+    padding: .72rem .6rem;
+    border-color: #edf0f3;
+    color: #3f4a58;
+    vertical-align: middle;
+  }
+  .project-table tbody tr:hover { background: #f8fafc; }
+  .project-table .amount-income { color: var(--project-green); font-weight: 700; }
+  .project-table .amount-expense { color: var(--project-red); font-weight: 700; }
+  .project-direction {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+    font-size: .8rem;
+  }
+  .project-direction.income { color: #087a43; background: #e3f5eb; }
+  .project-direction.expense { color: #b72f3b; background: #fbe8ea; }
+  .project-cell-main { color: #2e3948; font-weight: 600; }
+  .project-cell-sub { margin-top: .12rem; color: #8993a0; font-size: .7rem; }
+  .project-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: .18rem .45rem;
+    border-radius: 999px;
+    font-size: .68rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .project-badge.green { color: #087a43; background: #e3f5eb; }
+  .project-badge.red { color: #b72f3b; background: #fbe8ea; }
+  .project-badge.amber { color: #946000; background: #fff1d5; }
+  .project-badge.blue { color: #1e5f8d; background: #e8f2f9; }
+  .project-badge.gray { color: #616d7c; background: #edf0f3; }
+  .project-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .project-panel-header > .project-filter-bar { flex-wrap: nowrap; }
+  .project-filter-bar .btn {
+    padding: .28rem .55rem;
+    font-size: .72rem;
+  }
+  .project-filter-bar .btn.active {
+    color: #fff;
+    background: var(--project-primary);
+    border-color: var(--project-primary);
+  }
+  .project-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    flex-wrap: wrap;
+    padding: .7rem 1rem;
+    border-bottom: 1px solid var(--project-line);
+    background: #fbfcfd;
+  }
+  .project-search {
+    max-width: 240px;
+    min-width: 170px;
+  }
+  .project-log-list {
+    max-height: 360px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  .project-log-item {
+    padding: .65rem .1rem;
+    border-bottom: 1px solid #edf0f3;
+  }
+  .project-log-item:last-child { border-bottom: 0; }
+  .project-update-link {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    padding: .58rem .1rem;
+    color: #44505e;
+    text-decoration: none;
+    border-bottom: 1px solid #edf0f3;
+  }
+  .project-update-link:hover { color: var(--project-primary); }
+  .project-collapse-button {
+    width: 100%;
+    border: 0;
+    background: none;
+    text-align: left;
+  }
+  .project-empty {
+    padding: 1.5rem 1rem;
+    color: #8a94a0;
+    text-align: center;
+    font-size: .8rem;
+  }
+  .project-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 1rem;
+  }
+  @media (max-width: 1199.98px) {
+    .project-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 767.98px) {
+    .project-kpi-grid, .project-mini-grid { grid-template-columns: 1fr; }
+    .project-mini-grid.three { grid-template-columns: 1fr; }
+    .project-hero { padding: 1.1rem; }
+    .project-title { font-size: 1.25rem; }
+    .project-anchor-nav { top: .25rem; }
+  }
+</style>
+
+<div class="project-workspace">
+  <div class="project-breadcrumb">
+    <a href="{{ url_for('main.dashboard') }}"><i class="bi bi-house-door me-1"></i>首页</a>
+    <i class="bi bi-chevron-right"></i>
+    <a href="{{ url_for('main.projects_list') }}">项目</a>
+    <i class="bi bi-chevron-right"></i>
+    <span class="text-truncate">{{ project.name }}</span>
   </div>
 
+  <section class="project-hero">
+    <div class="project-hero-content d-flex justify-content-between align-items-start gap-4 flex-wrap">
+      <div class="d-flex align-items-start gap-3">
+        <span class="project-avatar"><i class="bi bi-kanban"></i></span>
+        <div>
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="project-status-pill {% if project.status == 'ended' %}ended{% endif %}">
+              <i class="bi bi-circle-fill" style="font-size:.42rem;"></i>
+              {{ '已终止' if project.status == 'ended' else ('进行中' if project.status == 'open' else project.status) }}
+            </span>
+            {% if is_parent %}
+              <span class="badge text-bg-light border">{{ link_summary.children|length }} 个关联项目</span>
+            {% endif %}
+          </div>
+          <h1 class="project-title mt-2 mb-0">{{ project.name }}</h1>
+          <div class="project-subtitle">
+            负责人：{{ members|selectattr('id', 'equalto', project.leader_user_id)|map(attribute='username')|first|default('未设置', true) }}
+            · {{ members|length }} 名项目成员
+          </div>
+        </div>
+      </div>
+      <div class="project-hero-actions">
+        {% if project.status != 'ended' %}
+          <a class="btn btn-light btn-sm" href="{{ url_for('main.transactions_new', project_id=project.id) }}">
+            <i class="bi bi-plus-lg me-1"></i>新增流水
+          </a>
+        {% endif %}
+        {% if is_admin and project.status != 'ended' %}
+          <a class="btn btn-outline-light btn-sm" href="{{ url_for('main.projects_edit', project_id=project.id) }}">
+            <i class="bi bi-pencil-square me-1"></i>编辑项目
+          </a>
+        {% endif %}
+        {% if (is_admin and project.status != 'ended') or (project.status != 'ended' and not end_req and (current_user.id in member_ids or is_admin)) or (is_admin and project.status != 'ended' and not delete_req) %}
+          <div class="dropdown">
+            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+              更多操作
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end shadow">
+              {% if is_admin and project.status != 'ended' %}
+                <li><a class="dropdown-item" href="{{ url_for('main.project_adjust', project_id=project.id) }}"><i class="bi bi-plus-circle me-2"></i>追加应收</a></li>
+              {% endif %}
+              {% if project.status != 'ended' and not end_req and (current_user.id in member_ids or is_admin) %}
+                <li>
+                  <form method="post" action="{{ url_for('main.project_end_request', project_id=project.id) }}" onsubmit="return confirm('确认发起终止项目申请？终止后项目将冻结为只读。');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="dropdown-item text-danger" type="submit"><i class="bi bi-stop-circle me-2"></i>发起终止</button>
+                  </form>
+                </li>
+              {% endif %}
+              {% if is_admin and project.status != 'ended' and not delete_req %}
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <form method="post" action="{{ url_for('main.projects_delete_request', project_id=project.id) }}" onsubmit="return confirm('确认发起删除申请？');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="dropdown-item text-danger" type="submit"><i class="bi bi-trash3 me-2"></i>发起删除</button>
+                  </form>
+                </li>
+              {% endif %}
+            </ul>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="project-meta-strip">
+      <span><i class="bi bi-calendar3"></i>{{ project.planned_start_date or '未设置' }} 至 {{ project.planned_end_date or '未设置' }}</span>
+      <span><i class="bi bi-people"></i>{{ members|length }} 人协作</span>
+      <span>
+        <i class="bi bi-clock-history"></i>
+        {% if project.status == 'ended' %}项目已归档{% elif days_left < 0 %}已逾期 {{ overdue_days }} 天{% else %}剩余 {{ days_left }} 天{% endif %}
+      </span>
+    </div>
+  </section>
+
   {% if project.status == 'ended' %}
-    <div class="alert alert-danger d-flex align-items-center gap-2 py-2 mb-3" role="alert">
-      <span class="fw-bold">⚠️</span>
-      <span>此项目已于 <strong>{{ project.ended_at.strftime('%Y-%m-%d %H:%M') if project.ended_at else '—' }}</strong> 终止，当前为只读状态。</span>
-      {% if current_user.id in (members|map(attribute='id')|list) or is_admin %}
-        <span class="ms-auto">
-          {% set revive_req = end_revive_req %}
+    <div class="project-attention ended mt-3">
+      <div>
+        <div class="fw-semibold text-danger"><i class="bi bi-archive me-1"></i>项目已于 {{ project.ended_at.strftime('%Y-%m-%d %H:%M') if project.ended_at else '—' }} 终止</div>
+        <div class="small text-muted mt-1">当前为只读状态，仍可查看流水、凭证、日志和历史统计。</div>
+      </div>
+      {% if current_user.id in member_ids or is_admin %}
+        {% set revive_req = end_revive_req %}
+        <div class="project-actions">
           {% if revive_req and revive_req.status == 'open' %}
-            <span class="badge text-bg-warning">复活审批中</span>
             {% set revive_approved_ids = revive_req.approvals|map(attribute='user_id')|list %}
-            {% set member_ids = members|map(attribute='id')|list %}
-            <span class="small ms-2">同意：{{ revive_approved_ids|length }} / {{ approval_required_count }}</span>
+            <span class="project-badge amber">复活审批 {{ revive_approved_ids|length }}/{{ approval_required_count }}</span>
             {% if current_user.id not in revive_approved_ids and (current_user.id == project.leader_user_id or is_admin) %}
-              <form method="post" action="{{ url_for('main.project_revive_approve', project_id=project.id) }}" class="d-inline ms-2">
+              <form method="post" action="{{ url_for('main.project_revive_approve', project_id=project.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-outline-light btn-sm" type="submit">同意复活</button>
+                <button class="btn btn-sm btn-success" type="submit">同意复活</button>
               </form>
             {% endif %}
             {% if is_admin or revive_req.created_by_user_id == current_user.id %}
-              <form method="post" action="{{ url_for('main.project_revive_cancel', project_id=project.id) }}" class="d-inline ms-1">
+              <form method="post" action="{{ url_for('main.project_revive_cancel', project_id=project.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-outline-secondary btn-sm" type="submit">取消</button>
+                <button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button>
               </form>
             {% endif %}
           {% else %}
-            <form method="post" action="{{ url_for('main.project_revive_request', project_id=project.id) }}" class="d-inline"
-                  onsubmit="return confirm('确认发起复活项目申请？复活后项目将恢复为进行中状态，可以继续操作。');">
+            <form method="post" action="{{ url_for('main.project_revive_request', project_id=project.id) }}" onsubmit="return confirm('确认发起复活项目申请？复活后项目恢复为进行中。');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-sm btn-outline-light" type="submit">复活项目</button>
+              <button class="btn btn-sm btn-outline-success" type="submit"><i class="bi bi-arrow-counterclockwise me-1"></i>申请复活</button>
             </form>
           {% endif %}
-        </span>
+        </div>
       {% endif %}
     </div>
   {% endif %}
 
+  {% if end_req %}
+    <div class="project-attention mt-3">
+      <div>
+        <div class="fw-semibold"><i class="bi bi-hourglass-split me-1"></i>终止项目审批中</div>
+        <div class="small text-muted mt-1">同意进度 {{ end_approved_ids|length }}/{{ approval_required_count }}</div>
+      </div>
+      <div class="project-actions">
+        {% if current_user.id in end_approved_ids %}
+          <span class="project-badge gray">你已同意</span>
+        {% elif current_user.id == project.leader_user_id or is_admin %}
+          <form method="post" action="{{ url_for('main.project_end_approve', project_id=project.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-danger" type="submit">同意终止</button>
+          </form>
+        {% endif %}
+        {% if is_admin or end_req.created_by_user_id == current_user.id %}
+          <form method="post" action="{{ url_for('main.project_end_cancel', project_id=project.id) }}" onsubmit="return confirm('确认取消终止申请？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
 
-  <div class="card mb-4" style="background:#f8fafc !important;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.06);border:1px solid #e8ecf0;">
-    <div class="card-body" style="background:transparent !important;">
-      <div class="fw-semibold mb-3" style="color:#1a2332;font-size:1.05rem;">📊 项目信息</div>
-      <div class="row g-3">
-        <div class="col-md-4">
-          <div class="text-muted small mb-1">👥 项目人员</div>
-          <div class="small">
-            {% set leader_id = project.leader_user_id %}
-            {% for u in display_members %}
-              {% if u.id == leader_id %}
-                <div class="mb-1"><span class="text-muted">负责人</span> <strong>{{ u.username }}</strong></div>
-              {% endif %}
-            {% endfor %}
-            <div style="max-height:120px;overflow-y:auto;scrollbar-width:thin;">
+  {% if delete_req %}
+    <div class="project-attention danger mt-3">
+      <div>
+        <div class="fw-semibold text-danger"><i class="bi bi-trash3 me-1"></i>删除项目审批中</div>
+        <div class="small text-muted mt-1">同意进度 {{ approved_user_ids|length }}/{{ approval_required_count }}</div>
+      </div>
+      <div class="project-actions">
+        {% if current_user.id in approved_user_ids %}
+          <span class="project-badge gray">你已同意</span>
+        {% elif current_user.id == project.leader_user_id or is_admin %}
+          <form method="post" action="{{ url_for('main.projects_delete_approve', project_id=project.id) }}" onsubmit="return confirm('确认同意删除？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-danger" type="submit">同意删除</button>
+          </form>
+        {% endif %}
+        {% if is_admin and delete_can_execute %}
+          <form method="post" action="{{ url_for('main.projects_delete_execute', project_id=project.id) }}" onsubmit="return confirm('确认执行删除？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-danger" type="submit">执行删除</button>
+          </form>
+        {% endif %}
+        {% if is_admin %}
+          <form method="post" action="{{ url_for('main.projects_delete_cancel', project_id=project.id) }}" onsubmit="return confirm('确认取消删除申请？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-secondary" type="submit">取消申请</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
+  <nav class="project-anchor-nav" aria-label="项目页面导航">
+    <a href="#overview"><i class="bi bi-grid me-1"></i>概览</a>
+    <a href="#finance"><i class="bi bi-calculator me-1"></i>应收与收支</a>
+    <a href="#funds"><i class="bi bi-wallet2 me-1"></i>资金账户</a>
+    {% if pending_transactions %}
+      <a href="#pending"><i class="bi bi-inbox me-1"></i>待审核<span class="count">{{ pending_transactions|length }}</span></a>
+    {% endif %}
+    <a href="#transactions"><i class="bi bi-list-ul me-1"></i>流水<span class="count">{{ tx_pagination.total }}</span></a>
+    <a href="#collaboration"><i class="bi bi-people me-1"></i>协作与日志</a>
+    {% if can_manage_log_rules or log_rule_rows or adjustments %}
+      <a href="#management"><i class="bi bi-sliders me-1"></i>项目管理</a>
+    {% endif %}
+  </nav>
+
+  <section id="overview" class="project-section">
+    <div class="row g-3">
+      <div class="col-xl-8">
+        <div class="project-kpi-grid">
+          <div class="project-kpi">
+            <div class="project-kpi-label">合同与关联总应收</div>
+            <div class="project-kpi-value">¥ {{ expected_total_cents|money }}</div>
+            <div class="project-kpi-note">我方净应收 ¥ {{ expected_net_cents|money }}</div>
+          </div>
+          <div class="project-kpi is-green">
+            <div class="project-kpi-label">我方已收净额</div>
+            <div class="project-kpi-value">¥ {{ received_net_cents|money }}</div>
+            <div class="project-kpi-note">银行累计入账 ¥ {{ received_cents|money }}</div>
+          </div>
+          <div class="project-kpi is-red">
+            <div class="project-kpi-label">我方未收净额</div>
+            <div class="project-kpi-value">¥ {{ remaining_net_cash_cents|money }}</div>
+            <div class="project-kpi-note">客户侧剩余应收 ¥ {{ remaining_gross_cents|money }}</div>
+          </div>
+          <div class="project-kpi is-amber">
+            <div class="project-kpi-label">已实现净利润</div>
+            <div class="project-kpi-value">¥ {{ profit_realized_cents|money }}</div>
+            <div class="project-kpi-note">全额回款后预计 ¥ {{ profit_if_fully_collected_cents|money }}</div>
+          </div>
+        </div>
+        <div class="project-side-card mt-3">
+          <div class="d-flex justify-content-between align-items-center gap-3 mb-2">
+            <div>
+              <div class="fw-semibold">回款进度</div>
+              <div class="small text-muted mt-1">按我方已收净额 / 我方净应收计算</div>
+            </div>
+            <div class="fs-5 fw-bold" style="color:var(--project-primary);">{{ collection_pct }}%</div>
+          </div>
+          <div class="project-progress-track"><span style="width:{{ collection_pct }}%;"></span></div>
+          <div class="d-flex justify-content-between small text-muted mt-2">
+            <span>已收 ¥ {{ received_net_cents|money }}</span>
+            <span>净应收 ¥ {{ expected_net_cents|money }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="col-xl-4">
+        <aside class="project-side-card">
+          <div class="project-side-title">
+            <span><i class="bi bi-info-circle me-1"></i>项目信息</span>
+            {% if project.status != 'ended' %}
+              <button class="btn btn-sm btn-outline-secondary py-0" type="button" data-bs-toggle="modal" data-bs-target="#endDateModal">修改日期</button>
+            {% endif %}
+          </div>
+          <div class="project-info-row">
+            <span class="project-info-label">负责人</span>
+            <strong>{{ members|selectattr('id', 'equalto', project.leader_user_id)|map(attribute='username')|first|default('未设置', true) }}</strong>
+          </div>
+          <div class="project-info-row">
+            <span class="project-info-label">项目周期</span>
+            <span class="text-end">{{ project.planned_start_date or '—' }}<br>{{ project.planned_end_date or '—' }}</span>
+          </div>
+          <div class="project-info-row">
+            <span class="project-info-label">时间进度</span>
+            <div class="text-end flex-grow-1 ms-3">
+              <div class="d-flex justify-content-between small mb-1">
+                <span class="{% if days_left < 0 %}text-danger fw-semibold{% endif %}">
+                  {% if days_left < 0 %}逾期 {{ overdue_days }} 天{% else %}剩余 {{ days_left }} 天{% endif %}
+                </span>
+                <span class="text-muted">{{ progress_pct }}%</span>
+              </div>
+              <div class="project-progress-track" style="height:5px;"><span class="{% if days_left < 0 %}bg-danger{% endif %}" style="width:{{ progress_pct }}%;{% if days_left < 0 %}background:#c2414b;{% endif %}"></span></div>
+            </div>
+          </div>
+          <div class="pt-3">
+            <div class="project-info-label mb-1">项目成员</div>
+            <div class="project-person-list">
               {% for u in display_members %}
-                {% if u.id != leader_id %}
-                  <div><span class="text-muted">人员</span> {{ u.username }}</div>
-                {% endif %}
+                <span class="project-person {% if u.id == project.leader_user_id %}leader{% endif %}">
+                  <i class="bi bi-person-circle"></i>{{ u.username }}
+                  {% if u.id == project.leader_user_id %}<span>负责人</span>{% endif %}
+                </span>
+              {% else %}
+                <span class="text-muted small">暂无成员</span>
               {% endfor %}
             </div>
-            {% if not display_members %}
-              <span class="text-muted">暂无成员</span>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section id="finance" class="project-section">
+    <div class="project-section-heading">
+      <div>
+        <h2><i class="bi bi-calculator me-1"></i>应收与收支</h2>
+        <p>应收、介绍费和未收净额的实时计算口径</p>
+      </div>
+    </div>
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <div class="project-panel h-100">
+          <div class="project-panel-header">
+            <div class="project-panel-title"><i class="bi bi-receipt"></i>应收结构</div>
+            {% if is_admin and project.status != 'ended' %}
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.project_adjust', project_id=project.id) }}">追加应收</a>
             {% endif %}
           </div>
-        </div>
-        <div class="col-md-8">
-          <div class="text-muted small mb-1">📅 周期</div>
-          <div class="text-muted small">{{ project.planned_start_date }} → {{ project.planned_end_date }}</div>
-          <div class="text-muted small">
-            {% if days_left < 0 %}
-              <span class="text-danger fw-bold">逾期 {{ overdue_days }} 天</span>
-            {% else %}
-              剩余 <span class="fw-semibold">{{ days_left }}</span> 天
-            {% endif %}
-            · 今天 {{ today }}
-          </div>
-          <div class="d-flex align-items-center gap-2 mt-2">
-            <div class="progress flex-grow-1" style="height:6px;border-radius:4px;background:#dde1e5;">
-              <div class="progress-bar {% if days_left < 0 %}progress-bar-striped bg-danger{% endif %}" role="progressbar" style="width:{{ progress_pct }}%;"></div>
-            </div>
-            <span class="small text-muted text-nowrap">{{ progress_pct }}%</span>
-            {% if project.status != 'ended' %}<button class="btn btn-sm btn-outline-secondary ms-1" data-bs-toggle="modal" data-bs-target="#endDateModal">修改日期</button>{% endif %}
-          </div>
-          <hr class="my-2">
-          <div class="d-flex gap-3 flex-wrap mb-2 py-1">
-            <div class="rounded-3 px-3 py-2" style="min-width:150px;background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">应收（含介绍费）</div>
-              <div class="fw-bold" style="font-size:1.2rem;color:#1a2332;">¥ {{ expected_total_cents|money }}</div>
-            </div>
-            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">介绍费</div>
-              <div class="fw-semibold" style="font-size:1.1rem;color:#6c757d;">¥ {{ broker_fee_expected_total_cents|money }}</div>
-            </div>
-            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">未收到费用</div>
-              {# 未收到费用＝剩余「客户侧全额」：净额模式下不能拿含介绍费的应收去减净额收入 #}
-              <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ remaining_gross_cents|money }}</div>
+          <div class="project-panel-body">
+            <div class="project-finance-list">
+              <div class="project-finance-row">
+                <div class="project-finance-label"><strong>合同与关联总应收</strong>当前项目及可见关联项目的合同应收</div>
+                <div class="project-finance-value">¥ {{ expected_total_cents|money }}</div>
+              </div>
+              <div class="project-finance-row">
+                <div class="project-finance-label"><strong>预期介绍费</strong>按项目中介规则计算</div>
+                <div class="project-finance-value">¥ {{ broker_fee_expected_total_cents|money }}</div>
+              </div>
+              <div class="project-finance-row">
+                <div class="project-finance-label"><strong>预期净应收</strong>总应收扣除预期介绍费</div>
+                <div class="project-finance-value">¥ {{ expected_net_cents|money }}</div>
+              </div>
+              <div class="project-finance-row">
+                <div class="project-finance-label"><strong>未收到费用</strong>客户侧剩余应收</div>
+                <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ remaining_gross_cents|money }}</div>
+              </div>
               {% if broker_unpaid_cents > 0 %}
-                <div class="text-muted" style="font-size:.68rem;">其中还要付中介 ¥{{ broker_unpaid_cents|money }}</div>
-              {% endif %}
-            </div>
-            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">未收净额（我方）</div>
-              {# 我方口径：剩余应收 − 还欠中介费（中介已付清时就等于剩余客户侧全额） #}
-              <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ remaining_net_cash_cents|money }}</div>
-            </div>
-          </div>
-          <hr style="border-top:2px dashed #dde1e5;" class="my-2">
-          <div class="d-flex gap-3 flex-wrap py-1">
-            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">收入</div>
-              <div class="fw-bold text-success" style="font-size:1.15rem;">¥ {{ received_cents|money }}</div>
-            </div>
-            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">支出</div>
-              <div class="fw-bold" style="font-size:1.15rem;color:#e74c3c;">¥ {{ paid_cents|money }}</div>
-            </div>
-            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">对公账户余额</div>
-              <div class="fw-bold {% if public_balance_cents < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.15rem;">¥ {{ public_balance_cents|money }}</div>
-            </div>
-            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">资金池余额</div>
-              <div class="fw-bold {% if pool_balance_cents < 0 %}text-danger{% else %}text-info{% endif %}" style="font-size:1.15rem;">¥ {{ pool_balance_cents|money }}</div>
-            </div>
-            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">可用资金合计</div>
-              <div class="fw-bold {% if available_fund_cents < 0 %}text-danger{% else %}text-primary{% endif %}" style="font-size:1.15rem;">¥ {{ available_fund_cents|money }}</div>
-            </div>
-            <div class="rounded-3 px-3 py-2" style="background:#fff;border:1px solid #e8ecf0;">
-              <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;">净利润</div>
-              {% set unpaid_broker = broker_fee_expected_total_cents - broker_paid_cents %}
-              {% if unpaid_broker < 0 %}{% set unpaid_broker = 0 %}{% endif %}
-              {% set net_profit = received_cents - paid_cents - unpaid_broker %}
-              <div class="fw-bold {% if net_profit < 0 %}text-danger{% else %}text-success{% endif %}" style="font-size:1.15rem;">
-                ¥ {{ net_profit|money }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-  {% include "_subcontracts.html" %}
-  {% include "_fund_pool.html" %}
-
-  <!-- 修改结束日期模态框 -->
-  <div class="modal fade" id="endDateModal" tabindex="-1"><div class="modal-dialog modal-sm modal-dialog-centered"><div class="modal-content">
-  {% if end_change_req %}
-    <div class="modal-header"><div class="modal-title small fw-semibold">修改结束日期</div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-    <div class="modal-body small">
-      <div class="alert alert-warning py-2 mb-2">审批中：<strong>{{ end_change_req.old_end_date }}</strong> → <strong>{{ end_change_req.new_end_date }}</strong></div>
-      <div class="small text-muted mb-2">同意：{{ end_change_req.approvals|length }} / {{ approval_required_count }}</div>
-      {% set ec_ap = end_change_req.approvals|map(attribute='user_id')|list %}
-      {% if current_user.id in ec_ap %}<span class="badge text-bg-secondary">你已同意</span>
-      {% elif current_user.id == project.leader_user_id or is_admin %}
-        <form method="post" action="{{ url_for('main.project_end_date_change_approve', project_id=project.id) }}" class="d-inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-primary" type="submit">同意</button></form>{% endif %}
-      {% if end_can_execute and (is_admin or current_user.id == project.leader_user_id) %}
-        <form method="post" action="{{ url_for('main.project_end_date_change_execute', project_id=project.id) }}" class="d-inline ms-1">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-success" type="submit">执行</button></form>{% endif %}
-      {% if is_admin or end_change_req.created_by_user_id == current_user.id %}
-        <form method="post" action="{{ url_for('main.project_end_date_change_cancel', project_id=project.id) }}" class="d-inline ms-1">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-secondary" type="submit" onclick="return confirm('确认取消？')">取消</button></form>{% endif %}
-    </div>
-  {% else %}
-    <form method="post" action="{{ url_for('main.project_end_date_change', project_id=project.id) }}">
-      <div class="modal-header"><div class="modal-title small fw-semibold">修改结束日期</div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body">{{ end_change_form.hidden_tag() }}{{ end_change_form.new_end_date(class="form-control") }}</div>
-      <div class="modal-footer"><button class="btn btn-sm btn-primary" type="submit">提交申请</button></div>
-    </form>
-  {% endif %}
-
-  </div></div></div>
-  <!-- /模态框 -->
-
-  <div class="row g-3">
-    <div class="col-md-6">
-    <div class="card mb-0" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.05);border:1px solid #e8ecf0;">
-    <div class="card-header py-2" style="cursor: pointer;background:linear-gradient(135deg,#5b7fa5,#4a6d8c);color:#fff;border-radius:10px 10px 0 0;" data-bs-toggle="collapse" data-bs-target="#activityLogCollapse" aria-expanded="false" aria-controls="activityLogCollapse">
-      <div class="d-flex justify-content-between align-items-center">
-        <span class="fw-bold"><span style="font-size:1.1rem;">📋</span> 操作记录</span>
-        <span class="small opacity-75">点击展开 ▼</span>
-      </div>
-    </div>
-    <div id="activityLogCollapse" class="collapse">
-      <div class="card-body">
-        <p class="small text-muted mb-2">系统自动记录关键操作（审批、删除、配置变更等）。</p>
-        <div class="mb-2 d-flex flex-wrap gap-1" id="log-filter-bar">
-          <span class="badge text-bg-primary log-filter active" data-filter="all" style="cursor:pointer;">📋 全部日志</span>
-          <span class="badge text-bg-light border log-filter" data-filter="project" style="cursor:pointer;">📁 项目日志</span>
-          <span class="badge text-bg-light border log-filter" data-filter="finance" style="cursor:pointer;">💳 财政日志</span>
-          <span class="badge text-bg-light border log-filter" data-filter="other" style="cursor:pointer;">🔧 其他日志</span>
-        </div>
-        <ul class="list-unstyled mb-0 small" style="max-height:300px;overflow-y:auto;scrollbar-width:thin;">
-          {% for log in activity_logs[:10] %}
-            {% set log_type = log.action.split('.')[0] %}
-            <li class="border-bottom py-2 log-item" data-log-type="{{ log_type }}" data-log-action="{{ log.action }}">
-              <div class="d-flex justify-content-between">
-                <div class="text-muted">
-                  {{ log.created_at.strftime('%m-%d %H:%M') }}
-                  {% if log.actor %} · {{ log.actor.username }}{% endif %}
+                <div class="project-finance-row">
+                  <div class="project-finance-label">
+                    <strong>其中还要付中介</strong>尚未支付的预期介绍费
+                    <span class="visually-hidden">其中还要付中介 ¥{{ broker_unpaid_cents|money }}</span>
+                  </div>
+                  <div class="project-finance-value text-danger">¥ {{ broker_unpaid_cents|money }}</div>
                 </div>
-                {% if log.detail %}
-                  <a href="#" class="small" onclick="event.preventDefault(); var el=document.getElementById('log-detail-{{ log.id }}'); el.style.display=el.style.display==='none'?'':'none';">详情</a>
-                {% endif %}
-              </div>
-              <div>{{ log.summary }}</div>
-              {% if log.detail %}
-                <div id="log-detail-{{ log.id }}" class="text-muted font-monospace mt-1" style="font-size:.75rem;display:none;">{{ log.detail }}</div>
               {% endif %}
-            </li>
-          {% else %}
-            <li class="text-muted">暂无操作日志</li>
-          {% endfor %}
-        </ul>
-        <hr class="my-2">
-      </div>
-    </div>
-    <hr class="my-1">
-  </div>
-    </div>
-    <div class="col-md-6">
-    <div class="card mb-0" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.05);border:1px solid #e8ecf0;">
-      <div class="card-body p-0">
-        <div class="d-flex justify-content-between align-items-center px-3 py-2" style="background:linear-gradient(135deg,#5b7fa5,#4a6d8c);color:#fff;border-radius:10px 10px 0 0;">
-          <span class="fw-bold"><span style="font-size:1.1rem;">📁</span> 进展日志</span>
-          <div>
-            <a href="{{ url_for('main.project_logs_new', project_id=project.id) }}" class="btn btn-sm btn-success py-0">+ 新增</a>
-            <a href="{{ url_for('main.project_logs', project_id=project.id) }}" class="btn btn-sm btn-outline-light py-0 ms-1">查看全部</a>
+              <div class="project-finance-row">
+                <div class="project-finance-label"><strong>未收净额（我方）</strong>剩余应收扣除还欠中介费</div>
+                <div class="fw-bold text-danger" style="font-size:1.1rem;">¥ {{ remaining_net_cash_cents|money }}</div>
+              </div>
+            </div>
           </div>
         </div>
-        {% if project_updates %}
-        <div class="px-3 py-1" style="max-height:300px;overflow-y:auto;scrollbar-width:thin;">
-          {% for u in project_updates[:10] %}
-            <a href="{{ url_for('main.project_logs', project_id=project.id, log_id=u.id) }}" class="d-flex align-items-center gap-2 py-1 text-decoration-none border-bottom" style="font-size:.8rem;">
-              <span class="text-muted text-nowrap">{{ u.created_at.strftime('%m-%d') if u.created_at else '' }}</span>
-              <span class="fw-semibold text-dark">{{ u.author.username if u.author else '?' }}</span>
-              <span class="text-muted text-truncate">{{ u.title or '（无标题）' }}</span>
-            </a>
-          {% endfor %}
+      </div>
+      <div class="col-lg-5">
+        <div class="project-panel h-100">
+          <div class="project-panel-header">
+            <div class="project-panel-title"><i class="bi bi-bar-chart-line"></i>收支摘要</div>
+          </div>
+          <div class="project-panel-body">
+            <div class="project-mini-grid">
+              <div class="project-mini-stat">
+                <div class="label">累计收入</div>
+                <div class="value text-success">¥ {{ received_cents|money }}</div>
+              </div>
+              <div class="project-mini-stat">
+                <div class="label">实际支出</div>
+                <div class="value text-danger">¥ {{ paid_cents|money }}</div>
+              </div>
+              <div class="project-mini-stat">
+                <div class="label">已实现净利润</div>
+                <div class="value {% if profit_realized_cents < 0 %}text-danger{% else %}text-success{% endif %}">¥ {{ profit_realized_cents|money }}</div>
+              </div>
+              <div class="project-mini-stat">
+                <div class="label">全额回款后预计利润</div>
+                <div class="value">¥ {{ profit_if_fully_collected_cents|money }}</div>
+              </div>
+            </div>
+            <div class="small text-muted mt-3">
+              支出按财务实付金额统计；审批中、待付款或已作废流水不会提前进入收益。
+            </div>
+          </div>
         </div>
-      {% endif %}
       </div>
     </div>
+    {% include "_subcontracts.html" %}
+  </section>
+
+  <section id="funds" class="project-section">
+    <div class="project-section-heading">
+      <div>
+        <h2><i class="bi bi-wallet2 me-1"></i>资金账户</h2>
+        <p>对公账户与项目资金池，内部划转不影响利润</p>
+      </div>
     </div>
-  </div>
+    {% include "_fund_pool.html" %}
+  </section>
 
-<script>
-document.querySelectorAll('.log-filter').forEach(function(el) {
-  el.addEventListener('click', function() {
-    document.querySelectorAll('.log-filter').forEach(function(b) {
-      b.className = b.className.replace(' text-bg-primary', ' text-bg-light border');
-    });
-    this.className = this.className.replace(' text-bg-light border', '') + ' text-bg-primary';
-    var filter = this.dataset.filter;
-    document.querySelectorAll('.log-item').forEach(function(item) {
-      var action = item.dataset.logType;
-      if (filter === 'all') { item.style.display = ''; return; }
-      var show = false;
-      if (filter === 'project') show = action === 'project' && item.dataset.logAction !== 'project.update_note';
-      else if (filter === 'note') show = item.dataset.logAction === 'project.update_note';
-      else if (filter === 'finance') show = action === 'transaction' || action === 'dividend';
-      else if (filter === 'other') show = action !== 'project' && action !== 'transaction' && action !== 'dividend';
-      item.style.display = show ? '' : 'none';
-    });
-  });
-});
-</script>
-
-  </div>
-  </div>
-
-  {% if can_manage_log_rules or log_rule_rows %}
-  <div class="card mb-4" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.05);border:1px solid #e8ecf0;">
-    <div class="card-header py-2" style="cursor:pointer;background:linear-gradient(135deg,#5b7fa5,#4a6d8c);color:#fff;border-radius:10px 10px 0 0;"
-         data-bs-toggle="collapse" href="#logRuleCollapse" role="button">
-      <span class="fw-bold"><span style="font-size:1.1rem;">📝</span> 日志撰写规则</span>
-      <span class="small ms-2 opacity-75">设定谁要在每周哪几天写日志；当天 20:00 前没写会发短信提醒</span>
-      <span class="small ms-2 opacity-75 float-end">
-        {% if log_rule_rows %}{{ log_rule_rows|length }} 条{% endif %} 点击展开 ▼
-      </span>
-    </div>
-    <div class="collapse" id="logRuleCollapse">
-    <div class="card-body">
-      {% if log_rule_rows %}
-        <div class="table-responsive mb-3">
-          <table class="table table-sm align-middle mb-0">
+  {% if pending_transactions %}
+    <section id="pending" class="project-section">
+      <div class="project-section-heading">
+        <div>
+          <h2><i class="bi bi-inbox me-1"></i>待审核流水</h2>
+          <p>审批并执行生效后，才会进入正式流水和报表统计</p>
+        </div>
+        <span class="project-badge amber">{{ pending_transactions|length }} 条待处理</span>
+      </div>
+      <div class="project-panel">
+        <div class="table-responsive">
+          <table class="table project-table align-middle">
             <thead>
-              <tr><th>撰写人</th><th>频率</th><th>设置</th><th class="text-end">操作</th></tr>
+              <tr>
+                <th>日期</th>
+                <th>类型与金额</th>
+                <th>对方与摘要</th>
+                <th>发起人</th>
+                <th>凭证</th>
+                <th class="text-end">审核</th>
+              </tr>
             </thead>
             <tbody>
-              {% for row in log_rule_rows %}
+              {% for t in pending_transactions %}
+                {% set creq = create_req_by_tx.get(t.id) %}
                 <tr>
-                  <td class="fw-semibold">{{ row.rule.user.username if row.rule.user else '—' }}</td>
-                  <td><span class="badge text-bg-primary">{{ row.label }}</span></td>
-                  <td class="small text-muted">
-                    {{ row.rule.created_by.username if row.rule.created_by else '—' }} · {{ row.rule.created_at|dt }}
+                  <td class="text-nowrap">{{ t.occur_date }}</td>
+                  <td>
+                    <div class="d-flex align-items-center gap-2">
+                      <span class="project-direction {{ t.type }}">
+                        <i class="bi bi-{{ 'arrow-down-left' if t.type == 'income' else 'arrow-up-right' }}"></i>
+                      </span>
+                      <div>
+                        <div class="fw-semibold">{{ '收入' if t.type == 'income' else '支出' }}</div>
+                        <div class="project-cell-sub">¥ {{ t.amount_cents|money }} · {{ fund_account_label(t.fund_account) }}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="project-cell-main">
+                      {% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}
+                        {{ user_name_map[t.recipient_user_id] }}
+                      {% else %}
+                        {{ t.counterparty or '未填写对方' }}
+                      {% endif %}
+                    </div>
+                    <div class="project-cell-sub text-truncate" style="max-width:300px;" title="{{ t.note or '' }}">{{ t.note or '无备注' }}</div>
+                  </td>
+                  <td>{{ t.created_by.username if t.created_by else '—' }}</td>
+                  <td>
+                    {% for a in t.attachments %}
+                      <a class="d-block text-decoration-none small" href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a>
+                    {% else %}
+                      <span class="text-muted small">无</span>
+                    {% endfor %}
                   </td>
                   <td class="text-end">
-                    {% if can_manage_log_rules %}
-                      <form method="post" class="d-inline"
-                            action="{{ url_for('main.project_log_rule_delete', project_id=project.id, rule_id=row.rule.id) }}"
-                            onsubmit="return confirm('删除这条日志撰写规则？');">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
-                      </form>
+                    {% if creq %}
+                      <div class="small text-muted mb-1">同意 {{ creq.approvals|length }}/{{ approval_required_count }}</div>
+                      {% set approved_ids = creq.approvals|map(attribute='user_id')|list %}
+                      <div class="project-actions justify-content-end">
+                        {% if current_user.id in approved_ids %}
+                          <span class="project-badge gray">你已同意</span>
+                        {% elif current_user.id == project.leader_user_id or is_admin %}
+                          <form method="post" action="{{ url_for('main.transactions_create_approve', transaction_id=t.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-primary" type="submit">同意</button>
+                          </form>
+                        {% endif %}
+                        {% if (is_admin or current_user.id == project.leader_user_id) and create_can_execute_by_tx.get(t.id) %}
+                          <form method="post" action="{{ url_for('main.transactions_create_execute', transaction_id=t.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-success" type="submit">执行生效</button>
+                          </form>
+                        {% endif %}
+                        {% if is_admin or creq.created_by_user_id == current_user.id %}
+                          <form method="post" action="{{ url_for('main.transactions_create_cancel', transaction_id=t.id) }}" onsubmit="return confirm('确认取消该新增申请？');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-secondary" type="submit">取消</button>
+                          </form>
+                        {% endif %}
+                      </div>
+                    {% else %}
+                      <span class="text-muted small">无审批记录</span>
                     {% endif %}
                   </td>
                 </tr>
@@ -369,356 +997,543 @@ document.querySelectorAll('.log-filter').forEach(function(el) {
             </tbody>
           </table>
         </div>
-      {% else %}
-        <div class="text-muted small mb-3">还没有设置日志撰写规则。</div>
-      {% endif %}
+      </div>
+    </section>
+  {% endif %}
 
-      {% if can_manage_log_rules %}
-        <form method="post" action="{{ url_for('main.project_log_rule_add', project_id=project.id) }}" class="row g-2 align-items-end">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <div class="col-md-3">
-            <label class="form-label small text-muted mb-1">撰写人</label>
-            <select class="form-select form-select-sm" name="user_id">
-              {% for m in log_rule_members %}<option value="{{ m.id }}">{{ m.username }}</option>{% endfor %}
-            </select>
+  <section id="transactions" class="project-section">
+    <div class="project-section-heading">
+      <div>
+        <h2><i class="bi bi-list-ul me-1"></i>项目流水</h2>
+        <p>结余按已结算流水顺序累计；资金账户互转不改变合计</p>
+      </div>
+      <span class="small text-muted">
+        第 {{ tx_pagination.page }} / {{ tx_pagination.pages }} 页 · 共 {{ tx_pagination.total }} 条
+      </span>
+    </div>
+    <div class="project-panel">
+      <div class="project-panel-header flex-wrap">
+        <div class="project-panel-title"><i class="bi bi-arrow-left-right"></i>流水明细</div>
+        <span class="project-badge gray">{{ tx_pagination.total }} 条记录</span>
+      </div>
+      <div class="project-toolbar">
+        <input id="project-tx-search" class="form-control form-control-sm project-search" type="search" placeholder="搜索对方、备注、人员…">
+        <div class="project-filter-bar">
+          <button class="btn btn-outline-secondary active" type="button" data-tx-filter="all">全部</button>
+          <button class="btn btn-outline-secondary" type="button" data-tx-filter="income">收入</button>
+          <button class="btn btn-outline-secondary" type="button" data-tx-filter="expense">支出</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table project-table align-middle">
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>金额</th>
+              <th class="text-end">结余</th>
+              <th>对方与摘要</th>
+              <th>账户与状态</th>
+              <th>发起人</th>
+              <th>凭证 / 审批</th>
+              <th class="text-end">操作</th>
+            </tr>
+          </thead>
+          <tbody id="project-tx-body">
+            {% for t in transactions %}
+              {% set ereq = edit_req_by_tx.get(t.id) %}
+              {% set dreq = delete_req_by_tx.get(t.id) %}
+              <tr data-tx-type="{{ t.type }}">
+                <td class="text-nowrap">{{ t.occur_date }}</td>
+                <td class="text-nowrap">
+                  <div class="d-flex align-items-center gap-2">
+                    <span class="project-direction {{ t.type }}">
+                      <i class="bi bi-{{ 'arrow-down-left' if t.type == 'income' else 'arrow-up-right' }}"></i>
+                    </span>
+                    <span class="{% if t.type == 'income' %}amount-income{% else %}amount-expense{% endif %}">
+                      {{ '+' if t.type == 'income' else '−' }} ¥ {{ t.amount_cents|money }}
+                    </span>
+                  </div>
+                </td>
+                <td class="text-end fw-semibold text-nowrap">¥ {{ balance_after_by_tx_id.get(t.id, 0)|money }}</td>
+                <td>
+                  <div class="project-cell-main">
+                    {% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}
+                      {{ user_name_map[t.recipient_user_id] }}
+                    {% else %}
+                      {{ t.counterparty or '未填写对方' }}
+                    {% endif %}
+                  </div>
+                  <div class="project-cell-sub text-truncate" style="max-width:320px;" title="{{ t.note or '' }}">{{ t.note or '无备注' }}</div>
+                </td>
+                <td>
+                  <div class="project-badge gray mb-1">{{ fund_account_label(t.fund_account) }}</div>
+                  <div>
+                    {% if t.type == 'income' %}
+                      {% if t.settled %}
+                        <span class="project-badge green">已到账</span>
+                      {% else %}
+                        <span class="project-badge amber">未到账</span>
+                      {% endif %}
+                    {% elif t.payment_status == 'pending' %}
+                      <span class="project-badge amber">待审批</span>
+                    {% elif t.payment_status == 'approved' %}
+                      <span class="project-badge blue">待打款</span>
+                    {% elif t.payment_status == 'paid' %}
+                      <span class="project-badge blue">待补回单</span>
+                    {% elif t.settled %}
+                      <span class="project-badge green">已付款</span>
+                    {% else %}
+                      <span class="project-badge gray">未付款</span>
+                    {% endif %}
+                  </div>
+                </td>
+                <td>{{ t.created_by.username if t.created_by else '—' }}</td>
+                <td>
+                  {% if ereq %}
+                    <div class="small">
+                      <span class="project-badge amber">修改待审批</span>
+                      <div class="project-cell-sub">同意 {{ ereq.approvals|length }}/{{ approval_required_count }}</div>
+                      {% set approved_ids = ereq.approvals|map(attribute='user_id')|list %}
+                      <div class="project-actions mt-1">
+                        {% if current_user.id in approved_ids %}
+                          <span class="project-badge gray">你已同意</span>
+                        {% elif current_user.id == project.leader_user_id or is_admin %}
+                          <form method="post" action="{{ url_for('main.transactions_edit_approve', transaction_id=t.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-primary py-0" type="submit">同意</button>
+                          </form>
+                        {% endif %}
+                        {% if is_admin or ereq.created_by_user_id == current_user.id %}
+                          <form method="post" action="{{ url_for('main.transactions_edit_cancel', transaction_id=t.id) }}" onsubmit="return confirm('确认取消该修改申请？');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-secondary py-0" type="submit">取消</button>
+                          </form>
+                        {% endif %}
+                      </div>
+                    </div>
+                  {% elif dreq %}
+                    <div class="small">
+                      <span class="project-badge red">删除待审批</span>
+                      <div class="project-cell-sub">同意 {{ dreq.approvals|length }}/{{ approval_required_count }}</div>
+                      {% set approved_ids = dreq.approvals|map(attribute='user_id')|list %}
+                      <div class="project-actions mt-1">
+                        {% if current_user.id in approved_ids %}
+                          <span class="project-badge gray">你已同意</span>
+                        {% elif current_user.id == project.leader_user_id or is_admin %}
+                          <form method="post" action="{{ url_for('main.transactions_delete_approve', transaction_id=t.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-danger py-0" type="submit">同意删除</button>
+                          </form>
+                        {% endif %}
+                        {% if is_admin or dreq.created_by_user_id == current_user.id %}
+                          <form method="post" action="{{ url_for('main.transactions_delete_cancel', transaction_id=t.id) }}" onsubmit="return confirm('确认取消该删除申请？');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-secondary py-0" type="submit">取消</button>
+                          </form>
+                        {% endif %}
+                      </div>
+                    </div>
+                  {% elif t.attachments %}
+                    {% set att_items = [] %}
+                    {% for a in t.attachments %}
+                      {% set _ = att_items.append({"name": a.filename, "url": url_for("main.uploads", filename=a.stored_path)}) %}
+                    {% endfor %}
+                    <a href="#" class="text-decoration-none d-inline-flex align-items-center gap-1 small"
+                       data-receipt-title="流水 #{{ t.id }} 的凭证"
+                       data-receipts='{{ att_items|tojson }}'>
+                      {% for a in t.attachments[:3] %}
+                        {% if a.filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.gif')) %}
+                          <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" alt=""
+                               style="height:30px;width:30px;object-fit:cover;border-radius:6px;border:1px solid #e4e9ee;">
+                        {% endif %}
+                      {% endfor %}
+                      <span>查看凭证{% if t.attachments|length > 1 %} ({{ t.attachments|length }}){% endif %}</span>
+                    </a>
+                  {% else %}
+                    <span class="text-muted small">无</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  {% if t.status == 'active' and project.status != 'ended' and current_user.id in member_ids %}
+                    <div class="dropdown">
+                      <button class="btn btn-sm btn-outline-secondary py-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-three-dots"></i>
+                      </button>
+                      <ul class="dropdown-menu dropdown-menu-end shadow">
+                        <li><a class="dropdown-item" href="{{ url_for('main.transactions_edit', transaction_id=t.id) }}"><i class="bi bi-pencil me-2"></i>修改</a></li>
+                        <li>
+                          <form method="post" action="{{ url_for('main.transactions_delete_request', transaction_id=t.id) }}" onsubmit="return confirm('确认发起删除申请？需审核通过后才能执行。');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="dropdown-item text-danger" type="submit"><i class="bi bi-trash3 me-2"></i>发起删除</button>
+                          </form>
+                        </li>
+                      </ul>
+                    </div>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="8" class="project-empty">暂无流水</td></tr>
+            {% endfor %}
+            <tr id="project-tx-no-match" class="d-none">
+              <td colspan="8" class="project-empty">没有找到匹配的流水</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {% if tx_pagination.pages > 1 %}
+        <div class="d-flex justify-content-between align-items-center px-3 py-2 border-top">
+          <span class="small text-muted">第 {{ tx_pagination.page }} / {{ tx_pagination.pages }} 页</span>
+          <nav aria-label="流水分页">
+            <ul class="pagination pagination-sm mb-0">
+              <li class="page-item {% if not tx_pagination.has_prev %}disabled{% endif %}">
+                {% if tx_pagination.has_prev %}
+                  <a class="page-link" href="{{ url_for('main.project_detail', project_id=project.id, tx_page=tx_pagination.prev_num) }}">上一页</a>
+                {% else %}
+                  <span class="page-link">上一页</span>
+                {% endif %}
+              </li>
+              <li class="page-item {% if not tx_pagination.has_next %}disabled{% endif %}">
+                {% if tx_pagination.has_next %}
+                  <a class="page-link" href="{{ url_for('main.project_detail', project_id=project.id, tx_page=tx_pagination.next_page if tx_pagination.next_page is defined else tx_pagination.next_num) }}">下一页</a>
+                {% else %}
+                  <span class="page-link">下一页</span>
+                {% endif %}
+              </li>
+            </ul>
+          </nav>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section id="collaboration" class="project-section">
+    <div class="project-section-heading">
+      <div>
+        <h2><i class="bi bi-people me-1"></i>协作与日志</h2>
+        <p>查看项目最近进展和关键操作记录</p>
+      </div>
+    </div>
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <div class="project-panel h-100">
+          <div class="project-panel-header">
+            <div class="project-panel-title"><i class="bi bi-journal-text"></i>进展日志</div>
+            <div class="project-actions">
+              <a class="btn btn-sm btn-success" href="{{ url_for('main.project_logs_new', project_id=project.id) }}"><i class="bi bi-plus-lg me-1"></i>写日志</a>
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.project_logs', project_id=project.id) }}">查看全部</a>
+            </div>
           </div>
-          <div class="col-md-6">
-            <label class="form-label small text-muted mb-1">频率（可多选；全选七天＝每天）</label>
-            <div class="d-flex flex-wrap gap-2">
-              {% for value, label in weekday_options %}
-                <div class="form-check form-check-inline me-0">
-                  <input class="form-check-input" type="checkbox" name="weekdays" value="{{ value }}" id="wd{{ value }}">
-                  <label class="form-check-label small" for="wd{{ value }}">{{ label }}</label>
+          <div class="project-panel-body py-2">
+            {% if project_updates %}
+              <div class="project-log-list">
+                {% for u in project_updates[:10] %}
+                  <a href="{{ url_for('main.project_logs', project_id=project.id, log_id=u.id) }}" class="project-update-link">
+                    <span class="project-direction income"><i class="bi bi-journal"></i></span>
+                    <div class="flex-grow-1 min-w-0">
+                      <div class="fw-semibold text-truncate">{{ u.title or '（无标题）' }}</div>
+                      <div class="project-cell-sub">{{ u.author.username if u.author else '?' }} · {{ u.created_at.strftime('%Y-%m-%d %H:%M') if u.created_at else '' }}</div>
+                    </div>
+                    <i class="bi bi-chevron-right text-muted"></i>
+                  </a>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="project-empty">还没有项目日志</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="project-panel h-100">
+          <div class="project-panel-header">
+            <div class="project-panel-title"><i class="bi bi-clock-history"></i>操作记录</div>
+            <div class="project-filter-bar">
+              <button class="btn btn-outline-secondary active" type="button" data-log-filter="all">全部</button>
+              <button class="btn btn-outline-secondary" type="button" data-log-filter="project">项目</button>
+              <button class="btn btn-outline-secondary" type="button" data-log-filter="finance">财务</button>
+              <button class="btn btn-outline-secondary" type="button" data-log-filter="other">其他</button>
+            </div>
+          </div>
+          <div class="project-panel-body py-2">
+            <div class="project-log-list">
+              {% for log in activity_logs[:12] %}
+                {% set log_type = log.action.split('.')[0] %}
+                <div class="project-log-item" data-log-type="{{ log_type }}" data-log-action="{{ log.action }}">
+                  <div class="d-flex justify-content-between gap-2">
+                    <div class="project-cell-sub">{{ log.created_at.strftime('%m-%d %H:%M') }}{% if log.actor %} · {{ log.actor.username }}{% endif %}</div>
+                    {% if log.detail %}
+                      <button class="btn btn-link btn-sm p-0 small" type="button"
+                              onclick="var el=document.getElementById('log-detail-{{ log.id }}'); el.classList.toggle('d-none');">详情</button>
+                    {% endif %}
+                  </div>
+                  <div class="small mt-1">{{ log.summary }}</div>
+                  {% if log.detail %}
+                    <div id="log-detail-{{ log.id }}" class="project-cell-sub font-monospace mt-1 d-none">{{ log.detail }}</div>
+                  {% endif %}
                 </div>
+              {% else %}
+                <div class="project-empty">暂无操作日志</div>
               {% endfor %}
             </div>
           </div>
-          <div class="col-md-3">
-            <button class="btn btn-sm btn-success" type="submit">+ 添加规则</button>
-            <span class="small text-muted ms-1">同一个人再加＝改频率</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {% if can_manage_log_rules or log_rule_rows or adjustments %}
+    <section id="management" class="project-section">
+      <div class="project-section-heading">
+        <div>
+          <h2><i class="bi bi-sliders me-1"></i>项目管理</h2>
+          <p>维护应收追加和日志撰写规则</p>
+        </div>
+      </div>
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="project-panel h-100">
+            <button class="project-panel-header project-collapse-button" type="button" data-bs-toggle="collapse" data-bs-target="#logRuleCollapse" aria-expanded="false">
+              <div class="project-panel-title"><i class="bi bi-calendar-check"></i>日志撰写规则</div>
+              <div class="small text-muted">{{ log_rule_rows|length if log_rule_rows else 0 }} 条 <i class="bi bi-chevron-down ms-1"></i></div>
+            </button>
+            <div class="collapse" id="logRuleCollapse">
+              <div class="project-panel-body">
+                <div class="small text-muted mb-3">指定成员在每周哪些日期写日志；当天 20:00 前未写会进入提醒。</div>
+                {% if log_rule_rows %}
+                  <div class="table-responsive mb-3">
+                    <table class="table project-table align-middle">
+                      <thead><tr><th>撰写人</th><th>频率</th><th>设置信息</th><th class="text-end">操作</th></tr></thead>
+                      <tbody>
+                        {% for row in log_rule_rows %}
+                          <tr>
+                            <td class="fw-semibold">{{ row.rule.user.username if row.rule.user else '—' }}</td>
+                            <td><span class="project-badge blue">{{ row.label }}</span></td>
+                            <td class="project-cell-sub">{{ row.rule.created_by.username if row.rule.created_by else '—' }} · {{ row.rule.created_at|dt }}</td>
+                            <td class="text-end">
+                              {% if can_manage_log_rules %}
+                                <form method="post" class="d-inline" action="{{ url_for('main.project_log_rule_delete', project_id=project.id, rule_id=row.rule.id) }}" onsubmit="return confirm('删除这条日志撰写规则？');">
+                                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                  <button class="btn btn-sm btn-outline-danger py-0" type="submit">删除</button>
+                                </form>
+                              {% endif %}
+                            </td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% endif %}
+                {% if can_manage_log_rules %}
+                  <form method="post" action="{{ url_for('main.project_log_rule_add', project_id=project.id) }}" class="row g-2 align-items-end">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="col-md-4">
+                      <label class="form-label small text-muted mb-1">撰写人</label>
+                      <select class="form-select form-select-sm" name="user_id">
+                        {% for m in log_rule_members %}<option value="{{ m.id }}">{{ m.username }}</option>{% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-md-8">
+                      <label class="form-label small text-muted mb-1">频率</label>
+                      <div class="d-flex flex-wrap gap-2">
+                        {% for value, label in weekday_options %}
+                          <div class="form-check form-check-inline me-0">
+                            <input class="form-check-input" type="checkbox" name="weekdays" value="{{ value }}" id="wd{{ value }}">
+                            <label class="form-check-label small" for="wd{{ value }}">{{ label }}</label>
+                          </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+                    <div class="col-12 d-flex justify-content-end">
+                      <button class="btn btn-sm btn-success" type="submit"><i class="bi bi-plus-lg me-1"></i>添加规则</button>
+                    </div>
+                  </form>
+                {% endif %}
+              </div>
+            </div>
           </div>
-        </form>
-      {% endif %}
-    </div>
-    </div>
-  </div>
-  {% endif %}
-
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <h2 class="h6 mb-0">
-      <a class="text-decoration-none text-body" data-bs-toggle="collapse" href="#adjustCollapse" role="button">
-        应收追加记录 <span class="text-muted small">（{% if adjustments %}{{ adjustments|length }}{% else %}0{% endif %} 条，点击展开 ▼）</span>
-      </a>
-    </h2>
-    {% if project.status != 'ended' and (is_admin or current_user.id in members|map(attribute='id')|list) %}
-      <a href="{{ url_for('main.project_adjust', project_id=project.id) }}" class="btn btn-sm btn-outline-primary">+ 追加应收</a>
-    {% endif %}
-  </div>
-  <div class="collapse" id="adjustCollapse">
-  <div class="table-responsive mb-4">
-    <table class="table table-sm align-middle">
-      <thead>
-        <tr>
-          <th>时间</th>
-          <th class="text-end">追加金额</th>
-          <th>备注</th>
-          <th>状态</th>
-          <th class="text-end">审核</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% set member_ids = members|map(attribute='id')|list %}
-        {% for a in adjustments %}
-          <tr class="{% if a.status == 'pending' %}table-warning{% endif %}">
-            <td class="text-muted small">{{ a.created_at }}</td>
-            <td class="text-end">¥ {{ a.amount_cents|money }}</td>
-            <td class="text-truncate" style="max-width: 520px;">{{ a.note or '' }}</td>
-            <td>
-              {% if a.status == 'active' or a.status == 'executed' %}
-                <span class="badge text-bg-success">已生效</span>
-              {% elif a.status == 'pending' %}
-                <span class="badge text-bg-warning">待审核</span>
-              {% elif a.status == 'cancelled' %}
-                <span class="badge text-bg-secondary">已取消</span>
-              {% endif %}
-            </td>
-            <td class="text-end">
-              {% if a.status == 'pending' %}
-                {% set approved_ids = a.approvals|map(attribute='user_id')|list %}
-                <div class="small text-muted mb-1">同意：{{ approved_ids|length }} / {{ approval_required_count }}</div>
-                {% if current_user.id in approved_ids %}
-                  <span class="badge text-bg-secondary">你已同意</span>
-                {% elif current_user.id == project.leader_user_id or is_admin %}
-                  <form method="post" action="{{ url_for('main.project_adjust_approve', project_id=project.id, adjustment_id=a.id) }}" class="d-inline">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button class="btn btn-sm btn-outline-primary" type="submit">同意追加</button>
-                  </form>
-                {% endif %}
-                {% if is_admin or a.created_by_user_id == current_user.id %}
-                  <form method="post" action="{{ url_for('main.project_adjust_cancel', project_id=project.id, adjustment_id=a.id) }}" class="d-inline ms-1"
-                        onsubmit="return confirm('确认取消该追加申请？');">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button class="btn btn-sm btn-outline-secondary" type="submit">取消</button>
-                  </form>
-                {% endif %}
-              {% endif %}
-            </td>
-          </tr>
-        {% else %}
-          <tr><td colspan="5" class="text-muted">暂无追加记录</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  </div>
-
-
-  {% if pending_transactions %}
-    <h2 class="h6">待审核流水</h2>
-    <div class="text-muted small mb-2">这些流水尚未计入统计/报表；满足《审核通过》后点击「执行生效」才会进入正式流水。</div>
-    <div class="table-responsive mb-3">
-      <table class="table table-sm align-middle">
-        <thead>
-          <tr>
-            <th>日期</th>
-            <th>类型</th>
-            <th>金额</th>
-            <th>状态</th>
-            <th>对方</th>
-            <th>发起人</th>
-            <th>备注</th>
-            <th>凭证</th>
-            <th class="text-end">审核</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% set member_ids = members|map(attribute='id')|list %}
-          {% for t in pending_transactions %}
-            {% set creq = create_req_by_tx.get(t.id) %}
-            <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
-              <td>{{ t.occur_date }}</td>
-              <td>{{ '收入' if t.type == 'income' else '支出' }}</td>
-              <td>
-                ¥ {{ t.amount_cents|money }}
-                <span class="badge text-bg-light border text-muted" style="font-size:.6rem;">{{ fund_account_label(t.fund_account) }}</span>
-              </td>
-              <td><span class="badge text-bg-warning">待审核</span></td>
-              <td>{% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}{{ user_name_map[t.recipient_user_id] }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
-              <td class="small">{{ t.created_by.username if t.created_by else '—' }}</td>
-              <td class="text-truncate" style="max-width: 360px;">{{ t.note or '' }}</td>
-              <td>
-                {% for a in t.attachments %}
-                  <div><a href="{{ url_for('main.uploads', filename=a.stored_path) }}" target="_blank">{{ a.filename }}</a></div>
-                {% else %}
-                  <span class="text-muted">无</span>
-                {% endfor %}
-              </td>
-              <td class="text-end">
-                {% if creq %}
-                  <div class="small text-muted mb-1">同意：{{ creq.approvals|length }} / {{ approval_required_count }}</div>
-                  {% set approved_ids = creq.approvals|map(attribute='user_id')|list %}
-                  {% if current_user.id in approved_ids %}
-                    <span class="badge text-bg-secondary">你已同意</span>
-                  {% elif current_user.id == project.leader_user_id or is_admin %}
-                    <form method="post" action="{{ url_for('main.transactions_create_approve', transaction_id=t.id) }}" class="d-inline">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                      <button class="btn btn-sm btn-outline-primary" type="submit">同意</button>
-                    </form>
-                  {% endif %}
-
-                  {% if (is_admin or current_user.id == project.leader_user_id) and create_can_execute_by_tx.get(t.id) %}
-                    <form method="post" action="{{ url_for('main.transactions_create_execute', transaction_id=t.id) }}" class="d-inline ms-1">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                      <button class="btn btn-sm btn-success" type="submit">执行生效</button>
-                    </form>
-                  {% endif %}
-
-                  {% if is_admin or creq.created_by_user_id == current_user.id %}
-                    <form method="post" action="{{ url_for('main.transactions_create_cancel', transaction_id=t.id) }}" class="d-inline ms-1"
-                          onsubmit="return confirm('确认取消该新增申请？');">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                      <button class="btn btn-sm btn-outline-secondary" type="submit">取消</button>
-                    </form>
-                  {% endif %}
-                {% else %}
-                  <span class="text-muted small">（无审批记录）</span>
-                {% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
-
-  <h2 class="h6">流水（该项目）</h2>
-  <div class="text-muted small mb-2">结余列：按时间顺序累计<strong>已结算</strong>流水（收入 +、支出 −）后的总可用资金；公户与资金池互转不改变合计。</div>
-  {% if tx_pagination.pages > 1 %}
-    <div class="text-muted small mb-2">第 {{ tx_pagination.page }} / {{ tx_pagination.pages }} 页，共 {{ tx_pagination.total }} 条</div>
-  {% endif %}
-  <div class="table-responsive">
-    <table class="table table-sm align-middle">
-      <thead>
-        <tr>
-          <th>日期</th>
-          <th>金额</th>
-          <th class="text-end">结余</th>
-          <th>资金账户</th>
-          <th>状态</th>
-          <th>对方</th>
-          <th>发起人</th>
-          <th>备注</th>
-          <th>凭证</th>
-          <th class="text-end">操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% set member_ids = members|map(attribute='id')|list %}
-        {% for t in transactions %}
-          <tr class="{% if t.type == 'income' %}table-success{% else %}table-warning{% endif %}">
-            <td>{{ t.occur_date }}</td>
-            <td>
-              {% if t.type == 'income' %}<span class="text-success fw-bold">+</span>{% else %}<span class="text-danger fw-bold">−</span>{% endif %}
-              ¥ {{ t.amount_cents|money }}
-            </td>
-            <td class="text-end small fw-semibold">¥ {{ (balance_after_by_tx_id.get(t.id, 0))|money }}</td>
-            <td class="small text-nowrap">
-              <span class="badge text-bg-light border text-muted">{{ fund_account_label(t.fund_account) }}</span>
-            </td>
-            <td class="small text-nowrap">
-              {% if t.type == 'income' %}
-                {% if t.settled %}
-                  <span class="badge text-bg-success-subtle text-success border-success-subtle">已到账</span>
-                {% else %}
-                  <span class="badge text-bg-warning-subtle text-warning border-warning-subtle">未到账</span>
-                {% endif %}
-              {% elif t.payment_status == 'pending' %}
-                <span class="badge text-bg-warning">待审批</span>
-              {% elif t.payment_status == 'approved' %}
-                <span class="badge text-bg-info">待打款</span>
-              {% elif t.payment_status == 'paid' %}
-                <span class="badge text-bg-info">待补回单</span>
-              {% elif t.settled %}
-                <span class="badge text-bg-success-subtle text-success border-success-subtle">已付款</span>
-              {% else %}
-                <span class="badge text-bg-warning-subtle text-warning border-warning-subtle">未付款</span>
-              {% endif %}
-            </td>
-            <td>{% if t.counterparty == '项目人员' and t.recipient_user_id and t.recipient_user_id in user_name_map %}{{ user_name_map[t.recipient_user_id] }}{% else %}{{ t.counterparty or '' }}{% endif %}</td>
-            <td class="small">{{ t.created_by.username if t.created_by else '—' }}</td>
-            <td class="text-truncate" style="max-width: 360px;">{{ t.note or '' }}</td>
-            <td>
-              {# 审批状态：修改/删除申请 #}
-              {% set ereq = edit_req_by_tx.get(t.id) %}
-              {% set dreq = delete_req_by_tx.get(t.id) %}
-              {% if ereq %}
-                <div class="small">
-                  <span class="badge text-bg-warning mb-1">审批中</span>
-                  <div class="text-muted">修改待审批</div>
-                  <div class="text-muted">同意：{{ ereq.approvals|length }} / {{ approval_required_count }}</div>
-                  {% set approved_ids = ereq.approvals|map(attribute='user_id')|list %}
-                  {% if current_user.id in approved_ids %}
-                    <span class="badge text-bg-secondary">你已同意</span>
-                  {% elif current_user.id == project.leader_user_id or is_admin %}
-                    <form method="post" action="{{ url_for('main.transactions_edit_approve', transaction_id=t.id) }}" class="d-inline">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                      <button class="btn btn-sm btn-outline-primary py-0" type="submit">同意</button>
-                    </form>
-                  {% endif %}
-                  {% if is_admin or ereq.created_by_user_id == current_user.id %}
-                    <form method="post" action="{{ url_for('main.transactions_edit_cancel', transaction_id=t.id) }}" class="d-inline ms-1"
-                          onsubmit="return confirm('确认取消该修改申请？');">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                      <button class="btn btn-sm btn-outline-secondary py-0" type="submit">取消</button>
-                    </form>
+        </div>
+        <div class="col-lg-6">
+          <div class="project-panel h-100">
+            <button class="project-panel-header project-collapse-button" type="button" data-bs-toggle="collapse" data-bs-target="#adjustCollapse" aria-expanded="false">
+              <div class="project-panel-title"><i class="bi bi-plus-slash-minus"></i>应收追加记录</div>
+              <div class="small text-muted">{{ adjustments|length if adjustments else 0 }} 条 <i class="bi bi-chevron-down ms-1"></i></div>
+            </button>
+            <div class="collapse" id="adjustCollapse">
+              <div class="project-panel-body">
+                <div class="d-flex justify-content-end mb-2">
+                  {% if project.status != 'ended' and (is_admin or current_user.id in member_ids) %}
+                    <a href="{{ url_for('main.project_adjust', project_id=project.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg me-1"></i>追加应收</a>
                   {% endif %}
                 </div>
-              {% elif dreq %}
-                <div class="small">
-                  <span class="badge text-bg-warning mb-1">审批中</span>
-                  <div class="text-muted">删除待审批</div>
-                  <div class="text-muted">同意：{{ dreq.approvals|length }} / {{ approval_required_count }}</div>
-                  {% set approved_ids = dreq.approvals|map(attribute='user_id')|list %}
-                  {% if current_user.id in approved_ids %}
-                    <span class="badge text-bg-secondary">你已同意</span>
-                  {% elif current_user.id == project.leader_user_id or is_admin %}
-                    <form method="post" action="{{ url_for('main.transactions_delete_approve', transaction_id=t.id) }}" class="d-inline">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                      <button class="btn btn-sm btn-outline-danger py-0" type="submit">同意删</button>
-                    </form>
-                  {% endif %}
-                  {% if is_admin or dreq.created_by_user_id == current_user.id %}
-                    <form method="post" action="{{ url_for('main.transactions_delete_cancel', transaction_id=t.id) }}" class="d-inline ms-1"
-                          onsubmit="return confirm('确认取消该删除申请？');">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                      <button class="btn btn-sm btn-outline-secondary py-0" type="submit">取消</button>
-                    </form>
-                  {% endif %}
+                <div class="table-responsive">
+                  <table class="table project-table align-middle">
+                    <thead><tr><th>时间</th><th class="text-end">金额</th><th>备注</th><th>状态</th><th class="text-end">审核</th></tr></thead>
+                    <tbody>
+                      {% for a in adjustments %}
+                        <tr>
+                          <td class="project-cell-sub text-nowrap">{{ a.created_at }}</td>
+                          <td class="text-end fw-semibold">¥ {{ a.amount_cents|money }}</td>
+                          <td class="text-truncate" style="max-width:260px;" title="{{ a.note or '' }}">{{ a.note or '—' }}</td>
+                          <td>
+                            {% if a.status in ('active', 'executed') %}
+                              <span class="project-badge green">已生效</span>
+                            {% elif a.status == 'pending' %}
+                              <span class="project-badge amber">待审核</span>
+                            {% elif a.status == 'cancelled' %}
+                              <span class="project-badge gray">已取消</span>
+                            {% endif %}
+                          </td>
+                          <td class="text-end">
+                            {% if a.status == 'pending' %}
+                              {% set approved_ids = a.approvals|map(attribute='user_id')|list %}
+                              <div class="project-cell-sub mb-1">同意 {{ approved_ids|length }}/{{ approval_required_count }}</div>
+                              {% if current_user.id in approved_ids %}
+                                <span class="project-badge gray">你已同意</span>
+                              {% elif current_user.id == project.leader_user_id or is_admin %}
+                                <form method="post" action="{{ url_for('main.project_adjust_approve', project_id=project.id, adjustment_id=a.id) }}">
+                                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                  <button class="btn btn-sm btn-outline-primary py-0" type="submit">同意追加</button>
+                                </form>
+                              {% endif %}
+                              {% if is_admin or a.created_by_user_id == current_user.id %}
+                                <form method="post" action="{{ url_for('main.project_adjust_cancel', project_id=project.id, adjustment_id=a.id) }}" class="mt-1" onsubmit="return confirm('确认取消该追加申请？');">
+                                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                  <button class="btn btn-sm btn-outline-secondary py-0" type="submit">取消</button>
+                                </form>
+                              {% endif %}
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% else %}
+                        <tr><td colspan="5" class="project-empty">暂无应收追加记录</td></tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
                 </div>
-              {% elif t.attachments %}
-                {# 点开右侧抽屉看凭证；图片直接给缩略图预览 #}
-                {% set att_items = [] %}
-                {% for a in t.attachments %}
-                  {% set _ = att_items.append({"name": a.filename, "url": url_for("main.uploads", filename=a.stored_path)}) %}
-                {% endfor %}
-                <a href="#" class="text-decoration-none d-inline-flex align-items-center gap-1"
-                   data-receipt-title="流水 #{{ t.id }} 的凭证"
-                   data-receipts='{{ att_items|tojson }}'>
-                  {% for a in t.attachments[:3] %}
-                    {% if a.filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.gif')) %}
-                      <img src="{{ url_for('main.uploads', filename=a.stored_path) }}" alt=""
-                           style="height:26px;width:26px;object-fit:cover;border-radius:4px;border:1px solid #e8ecf0;">
-                    {% endif %}
-                  {% endfor %}
-                  <span>查看凭证{% if t.attachments|length > 1 %} ({{ t.attachments|length }}){% endif %}</span>
-                </a>
-              {% else %}
-                <span class="text-muted">无</span>
-              {% endif %}
-            </td>
-            <td class="text-end">
-              {% if t.status == 'active' and project.status != 'ended' and current_user.id in member_ids %}
-                <div class="dropdown">
-                  <a href="#" class="text-muted dropdown-toggle text-decoration-none" data-bs-toggle="dropdown" aria-expanded="false">⚙️</a>
-                  <ul class="dropdown-menu dropdown-menu-end" style="min-width: auto;">
-                    <li><a class="dropdown-item small" href="{{ url_for('main.transactions_edit', transaction_id=t.id) }}">✏️ 修改</a></li>
-                    <li>
-                      <form method="post" action="{{ url_for('main.transactions_delete_request', transaction_id=t.id) }}"
-                            onsubmit="return confirm('确认发起删除申请？需审核通过后才能执行删除。');">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="dropdown-item small" type="submit">🗑️ 删除</button>
-                      </form>
-                    </li>
-                  </ul>
-                </div>
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
-          </tr>
-        {% else %}
-          <tr><td colspan="10" class="text-muted">暂无流水</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
+  <div class="project-footer">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.dashboard') }}"><i class="bi bi-arrow-left me-1"></i>返回首页</a>
+    <span class="small text-muted">项目数据按当前有效记录实时计算</span>
   </div>
 
-  {% if tx_pagination.pages > 1 %}
-    <nav class="mt-2" aria-label="流水分页">
-      <ul class="pagination pagination-sm">
-        {% if tx_pagination.has_prev %}
-          <li class="page-item"><a class="page-link" href="{{ url_for('main.project_detail', project_id=project.id, tx_page=tx_pagination.prev_num) }}">上一页</a></li>
+  <div class="modal fade" id="endDateModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        {% if end_change_req %}
+          <div class="modal-header">
+            <h5 class="modal-title">修改结束日期</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-warning py-2">审批中：<strong>{{ end_change_req.old_end_date }}</strong> → <strong>{{ end_change_req.new_end_date }}</strong></div>
+            <div class="small text-muted mb-2">同意：{{ end_change_req.approvals|length }} / {{ approval_required_count }}</div>
+            {% set ec_ap = end_change_req.approvals|map(attribute='user_id')|list %}
+            <div class="project-actions">
+              {% if current_user.id in ec_ap %}
+                <span class="project-badge gray">你已同意</span>
+              {% elif current_user.id == project.leader_user_id or is_admin %}
+                <form method="post" action="{{ url_for('main.project_end_date_change_approve', project_id=project.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-primary" type="submit">同意</button>
+                </form>
+              {% endif %}
+              {% if end_can_execute and (is_admin or current_user.id == project.leader_user_id) %}
+                <form method="post" action="{{ url_for('main.project_end_date_change_execute', project_id=project.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-success" type="submit">执行</button>
+                </form>
+              {% endif %}
+              {% if is_admin or end_change_req.created_by_user_id == current_user.id %}
+                <form method="post" action="{{ url_for('main.project_end_date_change_cancel', project_id=project.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-secondary" type="submit">取消</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
         {% else %}
-          <li class="page-item disabled"><span class="page-link">上一页</span></li>
+          <form method="post" action="{{ url_for('main.project_end_date_change', project_id=project.id) }}">
+            <div class="modal-header">
+              <h5 class="modal-title">修改结束日期</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">{{ end_change_form.hidden_tag() }}{{ end_change_form.new_end_date(class="form-control") }}</div>
+            <div class="modal-footer">
+              <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-dismiss="modal">取消</button>
+              <button class="btn btn-sm btn-primary" type="submit">提交申请</button>
+            </div>
+          </form>
         {% endif %}
-        {% if tx_pagination.has_next %}
-          <li class="page-item"><a class="page-link" href="{{ url_for('main.project_detail', project_id=project.id, tx_page=tx_pagination.next_num) }}">下一页</a></li>
-        {% else %}
-          <li class="page-item disabled"><span class="page-link">下一页</span></li>
-        {% endif %}
-      </ul>
-    </nav>
-  {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
 
-  <a class="btn btn-outline-secondary" href="{{ url_for('main.dashboard') }}">返回</a>
+{% block scripts %}
+<script>
+  (function () {
+    var filterButtons = Array.prototype.slice.call(document.querySelectorAll('[data-log-filter]'));
+    var logItems = Array.prototype.slice.call(document.querySelectorAll('[data-log-type]'));
+
+    function applyLogFilter(filter) {
+      logItems.forEach(function (item) {
+        var type = item.dataset.logType || '';
+        var action = item.dataset.logAction || '';
+        var show = filter === 'all';
+        if (filter === 'project') show = type === 'project';
+        if (filter === 'finance') show = ['transaction', 'dividend', 'fund'].indexOf(type) >= 0;
+        if (filter === 'other') show = ['project', 'transaction', 'dividend', 'fund'].indexOf(type) < 0;
+        item.classList.toggle('d-none', !show);
+      });
+    }
+
+    filterButtons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        filterButtons.forEach(function (other) { other.classList.remove('active'); });
+        button.classList.add('active');
+        applyLogFilter(button.dataset.logFilter || 'all');
+      });
+    });
+
+    var txSearch = document.getElementById('project-tx-search');
+    var txFilterButtons = Array.prototype.slice.call(document.querySelectorAll('[data-tx-filter]'));
+    var txRows = Array.prototype.slice.call(document.querySelectorAll('#project-tx-body tr[data-tx-type]'));
+    var noMatch = document.getElementById('project-tx-no-match');
+    var activeTxType = 'all';
+
+    function applyTxFilters() {
+      var query = ((txSearch && txSearch.value) || '').trim().toLowerCase();
+      var visible = 0;
+      txRows.forEach(function (row) {
+        var typeMatch = activeTxType === 'all' || row.dataset.txType === activeTxType;
+        var textMatch = !query || row.textContent.toLowerCase().indexOf(query) >= 0;
+        var show = typeMatch && textMatch;
+        row.classList.toggle('d-none', !show);
+        if (show) visible += 1;
+      });
+      if (noMatch) noMatch.classList.toggle('d-none', visible > 0 || (!query && activeTxType === 'all'));
+    }
+
+    txFilterButtons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        activeTxType = button.dataset.txFilter || 'all';
+        txFilterButtons.forEach(function (other) { other.classList.remove('active'); });
+        button.classList.add('active');
+        applyTxFilters();
+      });
+    });
+    if (txSearch) txSearch.addEventListener('input', applyTxFilters);
+  })();
+</script>
 {% endblock %}

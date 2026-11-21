@@ -20,8 +20,8 @@
 
       /* ===== Navbar ===== */
       .navbar.bg-primary { background: linear-gradient(135deg, var(--brand-primary) 0%, #2d5a87 100%) !important; }
-      .navbar-brand { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.5px; }
-      .navbar .nav-link { position: relative; padding: 0.5rem 1rem !important; transition: var(--transition-speed); }
+      .navbar-brand { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.5px; white-space: nowrap; flex-shrink: 0; }
+      .navbar .nav-link { position: relative; padding: 0.5rem 0.75rem !important; transition: var(--transition-speed); white-space: nowrap; }
       .navbar .nav-link::after {
         content: ''; position: absolute; bottom: 2px; left: 1rem; right: 1rem;
         height: 2px; background: var(--brand-accent); transform: scaleX(0); transition: transform var(--transition-speed);
@@ -31,7 +31,11 @@
         color: var(--brand-accent); font-weight: 700; font-size: 1.05rem;
         letter-spacing: 2px; text-shadow: 0 1px 3px rgba(0,0,0,0.25);
         border-right: 1px solid rgba(255,255,255,0.2); padding-right: 1rem; margin-right: 0.5rem;
+        white-space: nowrap; flex-shrink: 0;
       }
+      .navbar .navbar-collapse { min-width: 0; }
+      .navbar .navbar-nav { align-items: center; }
+      @media (max-width: 1399.98px) { .company-name { display: none; } }
       /* 有待办时铃铛轻微摆动，提示「有人发了申请还没人审」 */
       @keyframes bellPulse { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(12deg); } 75% { transform: rotate(-12deg); } }
       .nav-link .bi-bell.bell-ring { display: inline-block; animation: bellPulse 1.8s ease-in-out infinite; }

@@ -1,56 +1,48 @@
-<div class="card mb-4" style="border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.05);border:1px solid #e8ecf0;">
-  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2"
-       style="background:linear-gradient(135deg,#366b8f,#28536f);color:#fff;border-radius:10px 10px 0 0;">
-    <div>
-      <span class="fw-bold">💰 项目资金池</span>
-      <span class="small ms-2 opacity-75">
-        保管人：{{ fund_pool.custodian.username if fund_pool.custodian else '未设置' }}
-      </span>
+<div class="project-panel">
+  <div class="project-panel-header flex-wrap">
+    <div class="project-panel-title">
+      <i class="bi bi-wallet2"></i>
+      项目资金池
+      <span class="project-badge gray">保管人：{{ fund_pool.custodian.username if fund_pool.custodian else '未设置' }}</span>
     </div>
     {% if can_manage_fund_pool and project.status != 'ended' %}
-      <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-light" type="button" data-bs-toggle="modal" data-bs-target="#fundTransferModal">
-          资金划转
+      <div class="project-actions">
+        <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#fundTransferModal">
+          <i class="bi bi-arrow-left-right me-1"></i>资金划转
         </button>
-        <button class="btn btn-sm btn-outline-light" type="button" data-bs-toggle="modal" data-bs-target="#fundPoolSettingsModal">
-          设置
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#fundPoolSettingsModal">
+          <i class="bi bi-gear me-1"></i>设置
         </button>
       </div>
     {% endif %}
   </div>
-  <div class="card-body">
-    <div class="row g-2 mb-3">
-      <div class="col-md-4">
-        <div class="rounded-3 p-3 h-100" style="background:#f7fafc;border:1px solid #e8ecf0;">
-          <div class="text-muted small">对公账户余额</div>
-          <div class="fs-5 fw-bold">¥ {{ public_balance_cents|money }}</div>
-        </div>
+  <div class="project-panel-body">
+    <div class="project-mini-grid three mb-3">
+      <div class="project-mini-stat">
+        <div class="label"><i class="bi bi-bank me-1"></i>对公账户余额</div>
+        <div class="value {% if public_balance_cents < 0 %}text-danger{% else %}text-success{% endif %}">¥ {{ public_balance_cents|money }}</div>
       </div>
-      <div class="col-md-4">
-        <div class="rounded-3 p-3 h-100" style="background:#f2f8fb;border:1px solid #d9e8f0;">
-          <div class="text-muted small">资金池余额</div>
-          <div class="fs-5 fw-bold text-info">¥ {{ pool_balance_cents|money }}</div>
-        </div>
+      <div class="project-mini-stat">
+        <div class="label"><i class="bi bi-piggy-bank me-1"></i>资金池余额</div>
+        <div class="value {% if pool_balance_cents < 0 %}text-danger{% else %}text-info{% endif %}">¥ {{ pool_balance_cents|money }}</div>
       </div>
-      <div class="col-md-4">
-        <div class="rounded-3 p-3 h-100" style="background:#f6f8ff;border:1px solid #dfe5fa;">
-          <div class="text-muted small">项目可用资金合计</div>
-          <div class="fs-5 fw-bold text-primary">¥ {{ available_fund_cents|money }}</div>
-        </div>
+      <div class="project-mini-stat">
+        <div class="label"><i class="bi bi-cash-stack me-1"></i>项目可用资金合计</div>
+        <div class="value {% if available_fund_cents < 0 %}text-danger{% else %}text-primary{% endif %}">¥ {{ available_fund_cents|money }}</div>
       </div>
     </div>
 
-    <div class="alert alert-light border py-2 small mb-3">
+    <div class="alert alert-light border py-2 small mb-3" style="background:#f8fafc;">
       公户与资金池之间的划转只改变资金所在账户，不计收入、不计支出，也不改变项目利润。
       若工资中一部分是真实人工成本，请把该部分单独登记为支出，剩余代管资金再登记为划转。
     </div>
 
     <div class="d-flex justify-content-between align-items-center mb-2">
-      <div class="fw-semibold">最近资金划转</div>
-      <div class="text-muted small">共 {{ fund_transfers|length }} 条</div>
+      <div class="fw-semibold"><i class="bi bi-clock-history me-1"></i>最近资金划转</div>
+      <div class="project-badge gray">共 {{ fund_transfers|length }} 条</div>
     </div>
     <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0">
+      <table class="table project-table align-middle">
         <thead>
           <tr>
             <th>日期</th>
@@ -66,18 +58,18 @@
         <tbody>
           {% for transfer in fund_transfers %}
             <tr>
-              <td class="small text-nowrap">{{ transfer.occur_date }}</td>
-              {% if is_parent %}<td class="small">{{ transfer.project.name if transfer.project else '—' }}</td>{% endif %}
-              <td class="small text-nowrap">
+              <td class="text-nowrap">{{ transfer.occur_date }}</td>
+              {% if is_parent %}<td>{{ transfer.project.name if transfer.project else '—' }}</td>{% endif %}
+              <td class="text-nowrap">
                 {{ fund_account_label(transfer.from_account) }}
-                <span class="text-muted">→</span>
+                <i class="bi bi-arrow-right text-muted mx-1"></i>
                 {{ fund_account_label(transfer.to_account) }}
               </td>
               <td class="text-end fw-semibold">¥ {{ transfer.amount_cents|money }}</td>
-              <td class="small">{{ transfer.method }}</td>
-              <td class="small">{{ transfer.created_by.username if transfer.created_by else '—' }}</td>
-              <td class="small">
-                {% if transfer.note %}<div class="text-truncate" style="max-width:260px;">{{ transfer.note }}</div>{% endif %}
+              <td>{{ transfer.method }}</td>
+              <td>{{ transfer.created_by.username if transfer.created_by else '—' }}</td>
+              <td>
+                {% if transfer.note %}<div class="text-truncate" style="max-width:220px;" title="{{ transfer.note }}">{{ transfer.note }}</div>{% endif %}
                 {% if transfer.attachments %}
                   {% set att_items = [] %}
                   {% for a in transfer.attachments %}
@@ -85,9 +77,9 @@
                   {% endfor %}
                   <a href="#" class="text-decoration-none"
                      data-receipt-title="资金划转 #{{ transfer.id }} 的凭证"
-                     data-receipts='{{ att_items|tojson }}'>查看凭证（{{ transfer.attachments|length }}）</a>
+                     data-receipts='{{ att_items|tojson }}'><i class="bi bi-paperclip me-1"></i>查看凭证（{{ transfer.attachments|length }}）</a>
                 {% else %}
-                  <span class="text-muted">无</span>
+                  {% if not transfer.note %}<span class="text-muted">无</span>{% endif %}
                 {% endif %}
               </td>
               {% if can_manage_fund_pool and project.status != 'ended' %}
@@ -102,7 +94,7 @@
               {% endif %}
             </tr>
           {% else %}
-            <tr><td colspan="{% if is_parent %}8{% else %}7{% endif %}" class="text-muted">还没有资金划转记录</td></tr>
+            <tr><td colspan="{% if is_parent %}8{% else %}7{% endif %}" class="project-empty">还没有资金划转记录</td></tr>
           {% endfor %}
         </tbody>
       </table>
